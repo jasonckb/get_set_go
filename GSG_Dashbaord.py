@@ -282,9 +282,13 @@ def analyze_symbol(data):
         st.error(f"Error in analysis: {str(e)}")
         return None
 
-
 def main():
     st.title("Stock DMI MACD States Dashboard")
+    
+    # Clear cache if refresh button is clicked
+    if st.button("Refresh Data"):
+        # Clear all st.cache_data
+        st.cache_data.clear()
     
     # Sidebar for portfolio selection
     st.sidebar.title("Settings")
@@ -380,10 +384,7 @@ def main():
     html_table += "</table>"
     
     st.markdown(html_table, unsafe_allow_html=True)
-    
-    # Refresh button
-    if st.button("Refresh Data"):
-        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
+
