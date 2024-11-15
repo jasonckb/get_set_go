@@ -50,56 +50,43 @@ TIMEFRAMES = {
     "Hourly": "1h"
 }
 
-def rma(series, length):
-    """Calculate Rolling Moving Average"""
-    alpha = 1.0 / length
-    return series.ewm(alpha=alpha, min_periods=length, adjust=False).mean()
-
 def calculate_dmi(df, length=14, smoothing=14):
     try:
-        # Ensure all data is properly aligned
-        df = df.copy()
-        
-        # Calculate price changes
-        high_change = df['High'] - df['High'].shift(1)
-        low_change = df['Low'].shift(1) - df['Low']
+        # Create copies to avoid modifying original data
+        high = df['High'].copy()
+        low = df['Low'].copy()
+        close = df['Close'].copy()
         
         # Calculate True Range
-        tr = pd.DataFrame({
-            'hl': df['High'] - df['Low'],
-            'hc': abs(df['High'] - df['Close'].shift(1)),
-            'lc': abs(df['Low'] - df['Close'].shift(1))
-        }).max(axis=1)
+        tr1 = high - low
+        tr2 = (high - close.shift(1)).abs()
+        tr3 = (low - close.shift(1)).abs()
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         
         # Calculate Directional Movement
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+        
+        # Create +DM and -DM
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        # Set conditions for +DM and -DM
-        plus_dm = pd.Series(np.where(
-            (high_change > low_change) & (high_change > 0),
-            high_change,
-            0
-        ), index=df.index)
-        
-        minus_dm = pd.Series(np.where(
-            (low_change > high_change) & (low_change > 0),
-            low_change,
-            0
-        ), index=df.index)
+        plus_dm.loc[(up_move > down_move) & (up_move > 0)] = up_move
+        minus_dm.loc[(down_move > up_move) & (down_move > 0)] = down_move
         
         # Calculate smoothed values
-        tr_smoothed = rma(tr, length)
-        plus_dm_smoothed = rma(plus_dm, length)
-        minus_dm_smoothed = rma(minus_dm, length)
+        alpha = 1.0 / length
+        tr_smooth = tr.ewm(alpha=alpha, adjust=False).mean()
+        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False).mean()
+        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False).mean()
         
-        # Calculate DI+ and DI-
-        plus_di = 100 * plus_dm_smoothed / tr_smoothed
-        minus_di = 100 * minus_dm_smoothed / tr_smoothed
+        # Calculate +DI and -DI
+        plus_di = 100 * plus_dm_smooth / tr_smooth
+        minus_di = 100 * minus_dm_smooth / tr_smooth
         
         # Calculate ADX
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-        adx = rma(dx, smoothing)
+        adx = dx.ewm(alpha=1.0/smoothing, adjust=False).mean()
         
         return plus_di, minus_di, adx
         
@@ -107,39 +94,38 @@ def calculate_dmi(df, length=14, smoothing=14):
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
 
-def custom_ema(series, length, alpha_adj=19):
-    alpha = 2 / (length + alpha_adj)
-    return series.ewm(alpha=alpha, min_periods=length, adjust=False).mean()
-
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
-        close = df['Close']
-        fast_ma = custom_ema(close, fast_length, alpha_adj)
-        slow_ma = custom_ema(close, slow_length, alpha_adj)
+        close = df['Close'].copy()
+        
+        # Calculate EMAs
+        alpha_fast = 2 / (fast_length + alpha_adj)
+        alpha_slow = 2 / (slow_length + alpha_adj)
+        alpha_signal = 2 / (signal_length + alpha_adj)
+        
+        fast_ma = close.ewm(alpha=alpha_fast, adjust=False).mean()
+        slow_ma = close.ewm(alpha=alpha_slow, adjust=False).mean()
+        
         macd = fast_ma - slow_ma
-        signal = custom_ema(macd, signal_length, alpha_adj)
+        signal = macd.ewm(alpha=alpha_signal, adjust=False).mean()
+        
         return macd, signal
     except Exception as e:
         st.error(f"Error in MACD calculation: {str(e)}")
         return None, None
-
-def crossover(series1, series2):
-    return (series1.shift(1) <= series2.shift(1)) & (series1 > series2)
-
-def crossunder(series1, series2):
-    return (series1.shift(1) >= series2.shift(1)) & (series1 < series2)
 
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
     
     try:
-        dmi_cross_up = crossover(plus_di, minus_di)
-        dmi_cross_down = crossunder(plus_di, minus_di)
+        # Check crossovers
+        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
+        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
         
-        if dmi_cross_up.iloc[-1]:
+        if cross_up.iloc[-1]:
             return 4, "Bullish++"
-        elif dmi_cross_down.iloc[-1]:
+        elif cross_down.iloc[-1]:
             return -4, "Bearish++"
         elif plus_di.iloc[-1] > minus_di.iloc[-1]:
             if adx.iloc[-1] > adx.iloc[-2]:
@@ -160,13 +146,16 @@ def set_state(macd):
         return 0, "N/A"
     
     try:
-        zero_series = pd.Series(0, index=macd.index)
-        cross_zero_up = crossover(macd, zero_series)
-        cross_zero_down = crossunder(macd, zero_series)
+        # Create zero series with same index as MACD
+        zero_line = pd.Series(0, index=macd.index)
         
-        if cross_zero_up.iloc[-1]:
+        # Check crossovers
+        cross_up = (macd.shift(1) <= 0) & (macd > 0)
+        cross_down = (macd.shift(1) >= 0) & (macd < 0)
+        
+        if cross_up.iloc[-1]:
             return 3, "Set Bullish++"
-        elif cross_zero_down.iloc[-1]:
+        elif cross_down.iloc[-1]:
             return -3, "Set Bearish++"
         elif macd.iloc[-1] > 0:
             if macd.iloc[-1] > macd.iloc[-2]:
@@ -187,13 +176,16 @@ def go_state(signal):
         return 0, "N/A"
     
     try:
-        zero_series = pd.Series(0, index=signal.index)
-        cross_zero_up = crossover(signal, zero_series)
-        cross_zero_down = crossunder(signal, zero_series)
+        # Create zero series with same index as signal
+        zero_line = pd.Series(0, index=signal.index)
         
-        if cross_zero_up.iloc[-1]:
+        # Check crossovers
+        cross_up = (signal.shift(1) <= 0) & (signal > 0)
+        cross_down = (signal.shift(1) >= 0) & (signal < 0)
+        
+        if cross_up.iloc[-1]:
             return 3, "Go Bullish++"
-        elif cross_zero_down.iloc[-1]:
+        elif cross_down.iloc[-1]:
             return -3, "Go Bearish++"
         elif signal.iloc[-1] > 0:
             if signal.iloc[-1] > signal.iloc[-2]:
