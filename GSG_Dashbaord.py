@@ -126,27 +126,26 @@ def get_state(plus_di, minus_di, adx):
         return 0, "N/A"
     
     try:
-        # Check crossovers with proper thresholds
+        # Check crossover
         cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
         cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
         
-        # Get last values
+        # Get current values
         last_plus = plus_di.iloc[-1]
         last_minus = minus_di.iloc[-1]
-        last_adx = adx.iloc[-1]
-        prev_adx = adx.iloc[-2]
-                
+        adx_advancing = adx.iloc[-1] > adx.iloc[-2]
+        
         if cross_up.iloc[-1]:
             return 4, "Bullish++"
         elif cross_down.iloc[-1]:
             return -4, "Bearish++"
         elif last_plus > last_minus:
-            if last_adx > prev_adx:
+            if adx_advancing:
                 return 4, "Bullish+"
             else:
                 return 3, "Bullish-"
         else:
-            if last_adx > prev_adx:
+            if adx_advancing:
                 return -4, "Bearish+"
             else:
                 return -3, "Bearish-"
@@ -160,25 +159,24 @@ def set_state(macd):
         return 0, "N/A"
     
     try:
-        zero_line = pd.Series(0, index=macd.index)
-        
-        # Check crossovers with proper thresholds
+        # Check zero line crossover
         cross_up = (macd.shift(1) <= 0) & (macd > 0)
         cross_down = (macd.shift(1) >= 0) & (macd < 0)
         
-        # Get momentum
-                
+        # Check if advancing
+        advancing = macd.iloc[-1] > macd.iloc[-2]
+        
         if cross_up.iloc[-1]:
             return 3, "Set Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Set Bearish++"
         elif macd.iloc[-1] > 0:
-            if  macd.iloc[-1] > macd.iloc[-2]:
+            if advancing:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if  macd.iloc[-1] < macd.iloc[-2]:
+            if advancing:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
@@ -192,25 +190,24 @@ def go_state(signal):
         return 0, "N/A"
     
     try:
-        zero_line = pd.Series(0, index=signal.index)
-        
-        # Check crossovers with proper thresholds
+        # Check zero line crossover
         cross_up = (signal.shift(1) <= 0) & (signal > 0)
         cross_down = (signal.shift(1) >= 0) & (signal < 0)
         
-        # Get momentum
-                
+        # Check if advancing
+        advancing = signal.iloc[-1] > signal.iloc[-2]
+        
         if cross_up.iloc[-1]:
             return 3, "Go Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Go Bearish++"
         elif signal.iloc[-1] > 0:
-            if  signal.iloc[-1] > signal.iloc[-2]:
+            if advancing:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if  signal.iloc[-1] < signal.iloc[-2]:
+            if advancing:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
@@ -218,6 +215,7 @@ def go_state(signal):
     except Exception as e:
         st.error(f"Error in go_state: {str(e)}")
         return 0, "N/A"
+
 
 def get_trend(total_score):
     if abs(total_score) >= 5:
