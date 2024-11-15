@@ -61,15 +61,15 @@ def calculate_dmi(df, length=14, smoothing=14):
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         
         # Calculate Directional Movement
-        up_move = df['High'] - df['High'].shift(1)
-        down_move = df['Low'].shift(1) - df['Low']
+        high_diff = df['High'] - df['High'].shift(1)
+        low_diff = df['Low'].shift(1) - df['Low']
         
         # Calculate +DM and -DM
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_dm.loc[(up_move > down_move) & (up_move > 0)] = up_move
-        minus_dm.loc[(down_move > up_move) & (down_move > 0)] = down_move
+        plus_dm.loc[(high_diff > low_diff) & (high_diff > 0)] = high_diff
+        minus_dm.loc[(low_diff > high_diff) & (low_diff > 0)] = low_diff
         
         # Calculate smoothed values
         def wilder_smooth(series, length):
@@ -92,69 +92,11 @@ def calculate_dmi(df, length=14, smoothing=14):
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         adx = wilder_smooth(dx, smoothing)
         
-        # Show calculation details
-        details = pd.DataFrame({
-            'High': df['High'],
-            'Low': df['Low'],
-            'Close': df['Close'],
-            'TR': tr,
-            'TR_smooth': tr_smooth,
-            '+DM': plus_dm,
-            '-DM': minus_dm,
-            '+DM_smooth': plus_dm_smooth,
-            '-DM_smooth': minus_dm_smooth,
-            '+DI': plus_di,
-            '-DI': minus_di,
-            'DX': dx,
-            'ADX': adx
-        })
-        st.write("DMI Calculation Details (Last 5 rows):")
-        st.dataframe(details.tail())
-        
         return plus_di, minus_di, adx
         
     except Exception as e:
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
-
-def get_state(plus_di, minus_di, adx):
-    if plus_di is None or minus_di is None or adx is None:
-        return 0, "N/A"
-    
-    try:
-        # Ensure we have valid data
-        if len(plus_di) < 2 or len(minus_di) < 2 or len(adx) < 2:
-            return 0, "N/A"
-            
-        # Check crossovers
-        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
-        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
-        
-        # Get last values safely
-        last_plus = plus_di.iloc[-1]
-        last_minus = minus_di.iloc[-1]
-        last_adx = adx.iloc[-1]
-        prev_adx = adx.iloc[-2]
-        
-        if cross_up.iloc[-1]:
-            return 4, "Get Bullish++"
-        elif cross_down.iloc[-1]:
-            return -4, "Get Bearish++"
-        elif last_plus > last_minus:  # Bullish
-            if last_adx > prev_adx:
-                return 4, "Get Bullish+"
-            else:
-                return 3, "Get Bullish-"
-        else:  # Bearish
-            if last_adx > prev_adx:
-                return -4, "Get Bearish+"
-            else:
-                return -3, "Get Bearish-"
-                
-    except Exception as e:
-        st.error(f"Error in get_state: {str(e)}")
-        return 0, "N/A"
-
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
@@ -203,7 +145,7 @@ def get_state(plus_di, minus_di, adx):
                 return 3, "Get Bullish-"
         else:  # Bearish
             if adx_advancing:
-                return -4, "Get Bearish+"  # ADX advancing is strong in both cases
+                return -4, "Get Bearish+"
             else:
                 return -3, "Get Bearish-"
                 
@@ -225,9 +167,9 @@ def set_state(signal):
         advancing = signal.iloc[-1] > signal.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 3, "Set Bullish++"
+            return 2, "Set Bullish++"
         elif cross_down.iloc[-1]:
-            return -3, "Set Bearish++"
+            return -2, "Set Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Set Bullish+"
@@ -235,9 +177,9 @@ def set_state(signal):
                 return 1, "Set Bullish-"
         else:  # Bearish
             if advancing:
-                return -1, "Set Bearish-"  # Advancing is weaker in bearish
+                return -1, "Set Bearish-"
             else:
-                return -2, "Set Bearish+"  # Declining is stronger in bearish
+                return -2, "Set Bearish+"
                 
     except Exception as e:
         st.error(f"Error in set_state: {str(e)}")
@@ -257,9 +199,9 @@ def go_state(macd):
         advancing = macd.iloc[-1] > macd.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 3, "Go Bullish++"
+            return 2, "Go Bullish++"
         elif cross_down.iloc[-1]:
-            return -3, "Go Bearish++"
+            return -2, "Go Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Go Bullish+"
@@ -267,9 +209,9 @@ def go_state(macd):
                 return 1, "Go Bullish-"
         else:  # Bearish
             if advancing:
-                return -1, "Go Bearish-"  # Advancing is weaker in bearish
+                return -1, "Go Bearish-"
             else:
-                return -2, "Go Bearish+"  # Declining is stronger in bearish
+                return -2, "Go Bearish+"
                 
     except Exception as e:
         st.error(f"Error in go_state: {str(e)}")
@@ -343,7 +285,7 @@ def analyze_symbol(data):
         return {
             "Get": (get_str, "green" if get_val > 0 else "red" if get_val < 0 else "white"),
             "Set": (set_str, "green" if set_val > 0 else "red" if set_val < 0 else "white"),
-            "Go": (go_str, "green" if go_val > 0 else "red" if get_val < 0 else "white"),
+            "Go": (go_str, "green" if go_val > 0 else "red" if go_val < 0 else "white"),
             "Trend": (trend, color)
         }
     except Exception as e:
@@ -397,24 +339,21 @@ def main():
     table {
         width: 100%;
         border-collapse: collapse;
-        margin: 10px 0;
     }
     th, td {
         border: 1px solid gray;
         padding: 8px;
-        text-align: center;
+        text-align: left;
     }
-    th {
-        background-color: #f8f9fa;
-    }
-    .timeframe-header {
+    .timeframe {
         text-align: center;
         font-weight: bold;
-        background-color: #f8f9fa;
     }
-    .symbol-cell {
-        font-weight: normal;
+    .symbol {
         text-align: left;
+    }
+    .value {
+        text-align: center;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -422,29 +361,29 @@ def main():
     # Create HTML table
     html_table = "<table>"
     
-    # Main header row with timeframes
-    html_table += "<tr><td></td>"
+    # Header
+    html_table += "<tr><th></th>"
     for tf in TIMEFRAMES.keys():
-        html_table += f"<td colspan='4' class='timeframe-header'>{tf}</td>"
+        html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
     html_table += "</tr>"
     
-    # Sub-header row with columns
-    html_table += "<tr><th>Symbol</th>"
+    # Subheader
+    html_table += "<tr><th class='symbol'>Symbol</th>"
     for _ in TIMEFRAMES.keys():
-        html_table += "<th>Get</th><th>Set</th><th>Go</th><th>Trend</th>"
+        html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
     html_table += "</tr>"
     
     # Data rows
     for symbol in symbols:
-        html_table += f"<tr><td class='symbol-cell'>{symbol}</td>"
+        html_table += f"<tr><td class='symbol'>{symbol}</td>"
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
                 if isinstance(value, tuple):
                     text, color = value
-                    html_table += f"<td style='color:{color};'>{text}</td>"
+                    html_table += f"<td class='value' style='color:{color};'>{text}</td>"
                 else:
-                    html_table += f"<td>{value}</td>"
+                    html_table += f"<td class='value'>{value}</td>"
         html_table += "</tr>"
     
     html_table += "</table>"
@@ -457,5 +396,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
