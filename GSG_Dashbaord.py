@@ -314,10 +314,12 @@ def main():
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
     
+    # Process each symbol
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
         debug_data[symbol] = {}
         
+        # Process each timeframe
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
             if data is not None:
@@ -396,6 +398,60 @@ def main():
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
         for tf in TIMEFRAMES.keys():
+            for col in ['Get', 'Set', 'Go', 'Trend']:
+                value = results.loc[symbol, (tf, col)]
+                if isinstance(value, tuple):
+                    text, color = value
+                    html_table += f"<td class='value' style='color:{color};'>{text}</td>"
+                else:
+                    html_table += f"<td class='value'>{value}</td>"
+        html_table += "</tr>"
+    
+    html_table += "</table>"
+    
+    st.markdown(html_table, unsafe_allow_html=True)
+    
+    # Debug section
+    st.markdown("---")
+    st.header("Debug View")
+    
+    # Create tabs for Raw Data and Calculations
+    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
+    
+    with tab_raw:
+        # Select symbol and timeframe
+        col1, col2 = st.columns(2)
+        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
+        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
+        
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Last 5 rows of raw data for {selected_symbol} ({selected_tf})")
+            st.dataframe(debug_data[selected_symbol][selected_tf]['raw_data'])
+    
+    with tab_calc:
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Calculations for {selected_symbol} ({selected_tf})")
+            calcs = debug_data[selected_symbol][selected_tf]['calculations']
+            
+            # DMI Indicators
+            st.write("DMI Indicators:")
+            dmi_df = pd.DataFrame({
+                '+DI': calcs['plus_di'],
+                '-DI': calcs['minus_di'],
+                'ADX': calcs['adx']
+            })
+            st.dataframe(dmi_df)
+            
+            # MACD Indicators
+            st.write("MACD Indicators:")
+            macd_df = pd.DataFrame({
+                'MACD': calcs['macd'],
+                'Signal': calcs['signal']
+            })
+            st.dataframe(macd_df)
+
+if __name__ == "__main__":
+    main()
 
 
 
