@@ -282,7 +282,6 @@ def analyze_symbol(data):
     except Exception as e:
         st.error(f"Error in analysis: {str(e)}")
         return None
-
 def main():
     st.title("Stock DMI MACD States Dashboard")
     
@@ -353,49 +352,50 @@ def main():
     progress_bar.empty()
     status_text.empty()
     
-    # Display main results table
-    [Previous table display code remains the same]
+    # Table styling
+    st.markdown("""
+    <style>
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    th, td {
+        border: 1px solid gray;
+        padding: 8px;
+        text-align: left;
+    }
+    .timeframe {
+        text-align: center;
+        font-weight: bold;
+    }
+    .symbol {
+        text-align: left;
+    }
+    .value {
+        text-align: center;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Debug section
-    st.markdown("---")
-    st.header("Debug View")
+    # Create HTML table
+    html_table = "<table>"
     
-    # Create tabs for Raw Data and Calculations
-    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
+    # Header
+    html_table += "<tr><th></th>"
+    for tf in TIMEFRAMES.keys():
+        html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
+    html_table += "</tr>"
     
-    with tab_raw:
-        # Select symbol and timeframe
-        col1, col2 = st.columns(2)
-        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
-        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
-        
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 5 rows of raw data for {selected_symbol} ({selected_tf})")
-            st.dataframe(debug_data[selected_symbol][selected_tf]['raw_data'])
+    # Subheader
+    html_table += "<tr><th class='symbol'>Symbol</th>"
+    for _ in TIMEFRAMES.keys():
+        html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
+    html_table += "</tr>"
     
-    with tab_calc:
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Calculations for {selected_symbol} ({selected_tf})")
-            calcs = debug_data[selected_symbol][selected_tf]['calculations']
-            
-            # DMI Indicators
-            st.write("DMI Indicators:")
-            dmi_df = pd.DataFrame({
-                '+DI': calcs['plus_di'],
-                '-DI': calcs['minus_di'],
-                'ADX': calcs['adx']
-            })
-            st.dataframe(dmi_df)
-            
-            # MACD Indicators
-            st.write("MACD Indicators:")
-            macd_df = pd.DataFrame({
-                'MACD': calcs['macd'],
-                'Signal': calcs['signal']
-            })
-            st.dataframe(macd_df)
+    # Data rows
+    for symbol in symbols:
+        html_table += f"<tr><td class='symbol'>{symbol}</td>"
+        for tf in TIMEFRAMES.keys():
 
-if __name__ == "__main__":
-    main()
 
 
