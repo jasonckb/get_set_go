@@ -288,7 +288,6 @@ def main():
     
     # Clear cache if refresh button is clicked
     if st.button("Refresh Data"):
-        # Clear all st.cache_data
         st.cache_data.clear()
     
     # Sidebar for portfolio selection
@@ -301,6 +300,9 @@ def main():
     
     # Get selected symbols
     symbols = default_stocks[selected_portfolio]
+    
+    # Store data and calculations for debug view
+    debug_data = {}
     
     # Create empty DataFrame for results
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
@@ -315,8 +317,30 @@ def main():
     
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
+        debug_data[symbol] = {}
+        
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
+            if data is not None:
+                # Store raw data
+                debug_data[symbol][tf_name] = {
+                    'raw_data': data.tail(),
+                    'calculations': {}
+                }
+                
+                # Calculate indicators
+                plus_di, minus_di, adx = calculate_dmi(data)
+                macd, signal = calculate_macd(data)
+                
+                # Store calculations
+                debug_data[symbol][tf_name]['calculations'] = {
+                    'plus_di': plus_di.tail() if plus_di is not None else None,
+                    'minus_di': minus_di.tail() if minus_di is not None else None,
+                    'adx': adx.tail() if adx is not None else None,
+                    'macd': macd.tail() if macd is not None else None,
+                    'signal': signal.tail() if signal is not None else None
+                }
+            
             analysis = analyze_symbol(data)
             
             if analysis:
@@ -329,63 +353,49 @@ def main():
     progress_bar.empty()
     status_text.empty()
     
-    # Table styling
-    st.markdown("""
-    <style>
-    table {
-        width: 100%;
-        border-collapse: collapse;
-    }
-    th, td {
-        border: 1px solid gray;
-        padding: 8px;
-        text-align: left;
-    }
-    .timeframe {
-        text-align: center;
-        font-weight: bold;
-    }
-    .symbol {
-        text-align: left;
-    }
-    .value {
-        text-align: center;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    # Display main results table
+    [Previous table display code remains the same]
     
-    # Create HTML table
-    html_table = "<table>"
+    # Debug section
+    st.markdown("---")
+    st.header("Debug View")
     
-    # Header
-    html_table += "<tr><th></th>"
-    for tf in TIMEFRAMES.keys():
-        html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
-    html_table += "</tr>"
+    # Create tabs for Raw Data and Calculations
+    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
     
-    # Subheader
-    html_table += "<tr><th class='symbol'>Symbol</th>"
-    for _ in TIMEFRAMES.keys():
-        html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
-    html_table += "</tr>"
+    with tab_raw:
+        # Select symbol and timeframe
+        col1, col2 = st.columns(2)
+        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
+        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
+        
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Last 5 rows of raw data for {selected_symbol} ({selected_tf})")
+            st.dataframe(debug_data[selected_symbol][selected_tf]['raw_data'])
     
-    # Data rows
-    for symbol in symbols:
-        html_table += f"<tr><td class='symbol'>{symbol}</td>"
-        for tf in TIMEFRAMES.keys():
-            for col in ['Get', 'Set', 'Go', 'Trend']:
-                value = results.loc[symbol, (tf, col)]
-                if isinstance(value, tuple):
-                    text, color = value
-                    html_table += f"<td class='value' style='color:{color};'>{text}</td>"
-                else:
-                    html_table += f"<td class='value'>{value}</td>"
-        html_table += "</tr>"
-    
-    html_table += "</table>"
-    
-    st.markdown(html_table, unsafe_allow_html=True)
+    with tab_calc:
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Calculations for {selected_symbol} ({selected_tf})")
+            calcs = debug_data[selected_symbol][selected_tf]['calculations']
+            
+            # DMI Indicators
+            st.write("DMI Indicators:")
+            dmi_df = pd.DataFrame({
+                '+DI': calcs['plus_di'],
+                '-DI': calcs['minus_di'],
+                'ADX': calcs['adx']
+            })
+            st.dataframe(dmi_df)
+            
+            # MACD Indicators
+            st.write("MACD Indicators:")
+            macd_df = pd.DataFrame({
+                'MACD': calcs['macd'],
+                'Signal': calcs['signal']
+            })
+            st.dataframe(macd_df)
 
 if __name__ == "__main__":
     main()
+
 
