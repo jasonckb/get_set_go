@@ -167,9 +167,9 @@ def set_state(signal):
         advancing = signal.iloc[-1] > signal.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 2, "Set Bullish++"
+            return 3, "Set Bullish++"
         elif cross_down.iloc[-1]:
-            return -2, "Set Bearish++"
+            return -3, "Set Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Set Bullish+"
@@ -199,9 +199,9 @@ def go_state(macd):
         advancing = macd.iloc[-1] > macd.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 2, "Go Bullish++"
+            return 3, "Go Bullish++"
         elif cross_down.iloc[-1]:
-            return -2, "Go Bearish++"
+            return -3, "Go Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Go Bullish+"
@@ -227,9 +227,6 @@ def get_trend(total_score):
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
-    """
-    Fetch data for a given symbol and timeframe with data validation
-    """
     try:
         end_date = datetime.now()
         if timeframe == "1h":
@@ -241,60 +238,26 @@ def fetch_data(symbol, timeframe):
         else:  # Weekly
             start_date = end_date - timedelta(days=365)
             interval = "1wk"
-
-        # For HK stocks, ensure proper formatting
-        if ".HK" in symbol and not symbol.startswith("^"):
-            # Add leading zeros if needed
-            code = symbol.split(".")[0]
-            if len(code) < 4:
-                symbol = f"{int(code):04d}.HK"
-
+        
+        # Create a Ticker object
+        ticker = yf.Ticker(symbol)
+        
         # Download data
-        data = yf.download(
-            symbol,
+        data = ticker.history(
             start=start_date,
             end=end_date,
             interval=interval,
-            progress=False,
-            show_errors=False,
-            ignore_tz=True
+            auto_adjust=True
         )
-
-        # Data validation
-        if data is None or data.empty:
-            st.warning(f"No data available for {symbol}")
+        
+        if data.empty:
             return None
-
-        # Check for required columns
-        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-        if not all(col in data.columns for col in required_cols):
-            st.warning(f"Missing required columns for {symbol}")
-            return None
-
-        # Check for sufficient data points
+            
         if len(data) < 30:
-            st.warning(f"Insufficient data points for {symbol} (got {len(data)}, need 30)")
             return None
-
-        # Check for NaN values
-        if data[required_cols].isna().any().any():
-            # Drop rows with NaN values
-            data = data.dropna(subset=required_cols)
-            if len(data) < 30:
-                st.warning(f"Insufficient valid data points after cleaning for {symbol}")
-                return None
-
-        # Debug info
-        st.debug(f"""
-        Data validation for {symbol}:
-        - Timeframe: {timeframe}
-        - Data points: {len(data)}
-        - Date range: {data.index[0]} to {data.index[-1]}
-        - Columns: {list(data.columns)}
-        """)
-
+            
         return data
-
+        
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
