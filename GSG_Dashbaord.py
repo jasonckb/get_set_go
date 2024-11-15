@@ -206,12 +206,13 @@ def go_state(signal):
         return 0, "N/A"
 
 def get_trend(total_score):
-    if abs(total_score) >= 5:
-        if total_score > 0:
-            return f"Buy ({total_score})", "green"
-        else:
-            return f"Sell ({total_score})", "red"
-    return "", "white"  # Empty string for neutral trend
+    if total_score >= 5:
+        return f"Buy ({total_score})", "green"
+    elif total_score <= -5:
+        return f"Sell ({total_score})", "red"
+    else:
+        return f"Hold ({total_score})", "gray"
+
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
