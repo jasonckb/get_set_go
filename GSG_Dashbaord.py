@@ -330,37 +330,12 @@ def analyze_symbol(data):
         }
     
     try:
-        # Show raw data
-        st.write("Raw Data Last 5 Rows:")
-        st.dataframe(data.tail())
-        
-        # Calculate indicators
         plus_di, minus_di, adx = calculate_dmi(data)
         macd, signal = calculate_macd(data)
         
-        # Show calculations
-        st.write("Technical Indicators Last 5 Rows:")
-        indicators_df = pd.DataFrame({
-            'plus_di': plus_di,
-            'minus_di': minus_di,
-            'adx': adx,
-            'macd': macd,
-            'signal': signal
-        })
-        st.dataframe(indicators_df.tail())
-        
-        # Get states
         get_val, get_str = get_state(plus_di, minus_di, adx)
-        set_val, set_str = set_state(signal)
-        go_val, go_str = go_state(macd)
-        
-        # Show state calculations
-        st.write("State Values:")
-        st.write({
-            'Get': (get_val, get_str),
-            'Set': (set_val, set_str),
-            'Go': (go_val, go_str)
-        })
+        set_val, set_str = set_state(signal)  # Using signal line for Set state
+        go_val, go_str = go_state(macd)      # Using MACD line for Go state
         
         total_score = get_val + set_val + go_val
         trend, color = get_trend(total_score)
@@ -368,7 +343,7 @@ def analyze_symbol(data):
         return {
             "Get": (get_str, "green" if get_val > 0 else "red" if get_val < 0 else "white"),
             "Set": (set_str, "green" if set_val > 0 else "red" if set_val < 0 else "white"),
-            "Go": (go_str, "green" if go_val > 0 else "red" if go_val < 0 else "white"),
+            "Go": (go_str, "green" if go_val > 0 else "red" if get_val < 0 else "white"),
             "Trend": (trend, color)
         }
     except Exception as e:
@@ -466,3 +441,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
