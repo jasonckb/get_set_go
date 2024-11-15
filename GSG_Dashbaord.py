@@ -122,16 +122,6 @@ def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_ad
         return None, None
 
 def get_state(plus_di, minus_di, adx):
-    """DMI State Rules:
-    Bullish:
-    - Cross above: +4 "Get Bullish++"
-    - Above and ADX advancing: +4 "Get Bullish+"
-    - Above and ADX declining: +3 "Get Bullish-"
-    Bearish:
-    - Cross below: -4 "Get Bearish++"
-    - Below and ADX advancing: -4 "Get Bearish+"
-    - Below and ADX declining: -3 "Get Bearish-"
-    """
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
     
@@ -164,16 +154,6 @@ def get_state(plus_di, minus_di, adx):
         return 0, "N/A"
 
 def set_state(signal):
-    """Signal Line State Rules:
-    Bullish:
-    - Cross above zero: +3 "Set Bullish++"
-    - Above zero and advancing: +2 "Set Bullish+"
-    - Above zero and declining: +1 "Set Bullish-"
-    Bearish:
-    - Cross below zero: -3 "Set Bearish++"
-    - Below zero and declining: -2 "Set Bearish+"
-    - Below zero and advancing: -1 "Set Bearish-"
-    """
     if signal is None:
         return 0, "N/A"
     
@@ -206,16 +186,6 @@ def set_state(signal):
         return 0, "N/A"
 
 def go_state(macd):
-    """MACD Line State Rules:
-    Bullish:
-    - Cross above zero: +3 "Go Bullish++"
-    - Above zero and advancing: +2 "Go Bullish+"
-    - Above zero and declining: +1 "Go Bullish-"
-    Bearish:
-    - Cross below zero: -3 "Go Bearish++"
-    - Below zero and declining: -2 "Go Bearish+"
-    - Below zero and advancing: -1 "Go Bearish-"
-    """
     if macd is None:
         return 0, "N/A"
     
@@ -247,41 +217,16 @@ def go_state(macd):
         st.error(f"Error in go_state: {str(e)}")
         return 0, "N/A"
 
-def analyze_symbol(data):
-    if data is None or len(data) < 30:
-        return {
-            "Get": ("N/A", "white"),
-            "Set": ("N/A", "white"),
-            "Go": ("N/A", "white"),
-            "Trend": ("N/A", "white")
-        }
-    
-    try:
-        plus_di, minus_di, adx = calculate_dmi(data)
-        macd, signal = calculate_macd(data)
-        
-        get_val, get_str = get_state(plus_di, minus_di, adx)
-        set_val, set_str = set_state(signal)  # Using signal line for Set state
-        go_val, go_str = go_state(macd)      # Using MACD line for Go state
-        
-        total_score = get_val + set_val + go_val
-        trend, color = get_trend(total_score)
-        
-        return {
-            "Get": (get_str, "green" if get_val > 0 else "red" if get_val < 0 else "white"),
-            "Set": (set_str, "green" if set_val > 0 else "red" if set_val < 0 else "white"),
-            "Go": (go_str, "green" if go_val > 0 else "red" if go_val < 0 else "white"),
-            "Trend": (trend, color)
-        }
-    except Exception as e:
-        st.error(f"Error in analysis: {str(e)}")
-        return None
+def get_trend(total_score):
+    if abs(total_score) >= 5:
+        if total_score > 0:
+            return f"Buy ({total_score})", "green"
+        else:
+            return f"Sell ({total_score})", "red"
+    return "", "white"  # Empty string for neutral trend
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
-    """
-    Fetch data for a given symbol and timeframe with proper handling of Yahoo Finance's new format
-    """
     try:
         end_date = datetime.now()
         if timeframe == "1h":
@@ -315,6 +260,36 @@ def fetch_data(symbol, timeframe):
         
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return None
+
+def analyze_symbol(data):
+    if data is None or len(data) < 30:
+        return {
+            "Get": ("N/A", "white"),
+            "Set": ("N/A", "white"),
+            "Go": ("N/A", "white"),
+            "Trend": ("N/A", "white")
+        }
+    
+    try:
+        plus_di, minus_di, adx = calculate_dmi(data)
+        macd, signal = calculate_macd(data)
+        
+        get_val, get_str = get_state(plus_di, minus_di, adx)
+        set_val, set_str = set_state(signal)  # Using signal line for Set state
+        go_val, go_str = go_state(macd)      # Using MACD line for Go state
+        
+        total_score = get_val + set_val + go_val
+        trend, color = get_trend(total_score)
+        
+        return {
+            "Get": (get_str, "green" if get_val > 0 else "red" if get_val < 0 else "white"),
+            "Set": (set_str, "green" if set_val > 0 else "red" if set_val < 0 else "white"),
+            "Go": (go_str, "green" if go_val > 0 else "red" if go_val < 0 else "white"),
+            "Trend": (trend, color)
+        }
+    except Exception as e:
+        st.error(f"Error in analysis: {str(e)}")
         return None
 
 def main():
