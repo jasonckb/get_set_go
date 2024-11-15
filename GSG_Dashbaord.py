@@ -50,47 +50,45 @@ TIMEFRAMES = {
     "Hourly": "1h"
 }
 
+def rma(series, length):
+    """Replicate PineScript's ta.rma function"""
+    alpha = 1.0 / length
+    result = pd.Series(index=series.index)
+    result.iloc[0] = series.iloc[0]  # Initialize first value
+    for i in range(1, len(series)):
+        result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    return result
+
 def calculate_dmi(df, length=14, smoothing=14):
     try:
         df = df.copy()
         
-        # Calculate True Range
-        tr1 = df['High'] - df['Low']
-        tr2 = (df['High'] - df['Close'].shift(1)).abs()
-        tr3 = (df['Low'] - df['Close'].shift(1)).abs()
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        # Calculate directional movement (matching PineScript)
+        up = df['High'] - df['High'].shift(1)  # ta.change(high)
+        down = -(df['Low'] - df['Low'].shift(1))  # -ta.change(low)
         
-        # Calculate Directional Movement
-        high_diff = df['High'] - df['High'].shift(1)
-        low_diff = df['Low'].shift(1) - df['Low']
-        
-        # Calculate +DM and -DM
+        # Calculate DM (matching PineScript logic)
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_dm.loc[(high_diff > low_diff) & (high_diff > 0)] = high_diff
-        minus_dm.loc[(low_diff > high_diff) & (low_diff > 0)] = low_diff
+        plus_dm[(up > down) & (up > 0)] = up
+        minus_dm[(down > up) & (down > 0)] = down
         
-        # Calculate smoothed values
-        def wilder_smooth(series, length):
-            series = pd.Series(series)
-            result = pd.Series(index=series.index)
-            result.iloc[0:length] = series.iloc[0:length].mean()
-            for i in range(length, len(series)):
-                result.iloc[i] = (result.iloc[i-1] * (length-1) + series.iloc[i]) / length
-            return result
+        # Calculate True Range
+        tr = pd.DataFrame({
+            'hl': df['High'] - df['Low'],
+            'hc': abs(df['High'] - df['Close'].shift(1)),
+            'lc': abs(df['Low'] - df['Close'].shift(1))
+        }).max(axis=1)
         
-        tr_smooth = wilder_smooth(tr, length)
-        plus_dm_smooth = wilder_smooth(plus_dm, length)
-        minus_dm_smooth = wilder_smooth(minus_dm, length)
+        # Use RMA for smoothing (matching ta.rma)
+        tr_rma = rma(tr, length)
+        plus_di = 100 * rma(plus_dm, length) / tr_rma
+        minus_di = 100 * rma(minus_dm, length) / tr_rma
         
-        # Calculate +DI and -DI
-        plus_di = 100 * plus_dm_smooth / tr_smooth
-        minus_di = 100 * minus_dm_smooth / tr_smooth
-        
-        # Calculate ADX
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-        adx = wilder_smooth(dx, smoothing)
+        # Calculate ADX (matching PineScript)
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1)
+        adx = rma(dx, smoothing)
         
         return plus_di, minus_di, adx
         
@@ -98,22 +96,24 @@ def calculate_dmi(df, length=14, smoothing=14):
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
 
+def pine_ema(series, length, alpha_adj=19):
+    """Replicate PineScript's pine_ema function"""
+    alpha = 2 / (length + alpha_adj)
+    result = pd.Series(index=series.index)
+    result.iloc[0] = series.iloc[0]  # Initialize first value
+    for i in range(1, len(series)):
+        result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    return result
+
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
         close = df['Close'].copy()
         
-        # Calculate EMAs with alpha adjustment
-        alpha_fast = 2 / (fast_length + alpha_adj)
-        alpha_slow = 2 / (slow_length + alpha_adj)
-        alpha_signal = 2 / (signal_length + alpha_adj)
-        
-        # Calculate MACD line
-        fast_ma = close.ewm(alpha=alpha_fast, adjust=False).mean()
-        slow_ma = close.ewm(alpha=alpha_slow, adjust=False).mean()
+        # Calculate MACD using pine_ema (matching PineScript)
+        fast_ma = pine_ema(close, fast_length, alpha_adj)
+        slow_ma = pine_ema(close, slow_length, alpha_adj)
         macd = fast_ma - slow_ma
-        
-        # Calculate Signal line
-        signal = macd.ewm(alpha=alpha_signal, adjust=False).mean()
+        signal = pine_ema(macd, signal_length, alpha_adj)
         
         return macd, signal
         
@@ -126,92 +126,80 @@ def get_state(plus_di, minus_di, adx):
         return 0, "N/A"
     
     try:
-        # Check crossovers
-        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
-        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
+        # Check crossovers (matching PineScript ta.crossover/ta.crossunder)
+        dmi_cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
+        dmi_cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
         
-        # Current position and ADX movement
-        above_di = plus_di.iloc[-1] > minus_di.iloc[-1]
-        adx_advancing = adx.iloc[-1] > adx.iloc[-2]
-        
-        if cross_up.iloc[-1]:
-            return 4, "Get Bullish++"
-        elif cross_down.iloc[-1]:
-            return -4, "Get Bearish++"
-        elif above_di:  # Bullish
-            if adx_advancing:
-                return 4, "Get Bullish+"
+        if dmi_cross_up.iloc[-1]:
+            return 4, "Bullish++"
+        elif dmi_cross_down.iloc[-1]:
+            return -4, "Bearish++"
+        elif plus_di.iloc[-1] > minus_di.iloc[-1]:
+            if adx.iloc[-1] > adx.iloc[-2]:
+                return 4, "Bullish+"
             else:
-                return 3, "Get Bullish-"
-        else:  # Bearish
-            if adx_advancing:
-                return -4, "Get Bearish+"
+                return 3, "Bullish-"
+        else:
+            if adx.iloc[-1] > adx.iloc[-2]:
+                return -4, "Bearish+"
             else:
-                return -3, "Get Bearish-"
+                return -3, "Bearish-"
                 
     except Exception as e:
         st.error(f"Error in get_state: {str(e)}")
         return 0, "N/A"
 
-def set_state(signal):
-    if signal is None:
+def set_state(macd):
+    if macd is None:
         return 0, "N/A"
     
     try:
-        # Check zero line crossovers
-        cross_up = (signal.shift(1) <= 0) & (signal > 0)
-        cross_down = (signal.shift(1) >= 0) & (signal < 0)
-        
-        # Current position and movement
-        above_zero = signal.iloc[-1] > 0
-        advancing = signal.iloc[-1] > signal.iloc[-2]
+        # Check crossovers (matching PineScript)
+        cross_up = (macd.shift(1) <= 0) & (macd > 0)
+        cross_down = (macd.shift(1) >= 0) & (macd < 0)
         
         if cross_up.iloc[-1]:
             return 2, "Set Bullish++"
         elif cross_down.iloc[-1]:
             return -2, "Set Bearish++"
-        elif above_zero:  # Bullish
-            if advancing:
-                return 2, "Set Bullish+"
+        elif macd.iloc[-1] > 0:
+            if macd.iloc[-1] > macd.iloc[-2]:
+                return 2, "Bullish+"
             else:
-                return 1, "Set Bullish-"
-        else:  # Bearish
-            if advancing:
-                return -1, "Set Bearish-"
+                return 1, "Bullish-"
+        else:
+            if macd.iloc[-1] < macd.iloc[-2]:
+                return -2, "Bearish+"
             else:
-                return -2, "Set Bearish+"
+                return -1, "Bearish-"
                 
     except Exception as e:
         st.error(f"Error in set_state: {str(e)}")
         return 0, "N/A"
 
-def go_state(macd):
-    if macd is None:
+def go_state(signal):
+    if signal is None:
         return 0, "N/A"
     
     try:
-        # Check zero line crossovers
-        cross_up = (macd.shift(1) <= 0) & (macd > 0)
-        cross_down = (macd.shift(1) >= 0) & (macd < 0)
-        
-        # Current position and movement
-        above_zero = macd.iloc[-1] > 0
-        advancing = macd.iloc[-1] > macd.iloc[-2]
+        # Check crossovers (matching PineScript)
+        cross_up = (signal.shift(1) <= 0) & (signal > 0)
+        cross_down = (signal.shift(1) >= 0) & (signal < 0)
         
         if cross_up.iloc[-1]:
             return 2, "Go Bullish++"
         elif cross_down.iloc[-1]:
             return -2, "Go Bearish++"
-        elif above_zero:  # Bullish
-            if advancing:
-                return 2, "Go Bullish+"
+        elif signal.iloc[-1] > 0:
+            if signal.iloc[-1] > signal.iloc[-2]:
+                return 2, "Bullish+"
             else:
-                return 1, "Go Bullish-"
-        else:  # Bearish
-            if advancing:
-                return -1, "Go Bearish-"
+                return 1, "Bullish-"
+        else:
+            if signal.iloc[-1] < signal.iloc[-2]:
+                return -2, "Bearish+"
             else:
-                return -2, "Go Bearish+"
+                return -1, "Bearish-"
                 
     except Exception as e:
         st.error(f"Error in go_state: {str(e)}")
