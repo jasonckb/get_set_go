@@ -54,6 +54,9 @@ def calculate_dmi(df, length=14, smoothing=14):
     try:
         df = df.copy()
         
+        # Drop rows with zero or NaN values
+        df = df.replace(0, np.nan).dropna()
+        
         # Calculate True Range
         tr1 = df['High'] - df['Low']
         tr2 = (df['High'] - df['Close'].shift(1)).abs()
@@ -61,25 +64,32 @@ def calculate_dmi(df, length=14, smoothing=14):
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         
         # Calculate Directional Movement
-        high_diff = df['High'] - df['High'].shift(1)
-        low_diff = df['Low'].shift(1) - df['Low']
+        up_move = df['High'] - df['High'].shift(1)
+        down_move = df['Low'].shift(1) - df['Low']
         
-        # Calculate +DM and -DM with proper conditions
+        # Calculate +DM and -DM
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_dm.loc[(high_diff > low_diff) & (high_diff > 0)] = high_diff
-        minus_dm.loc[(low_diff > high_diff) & (low_diff > 0)] = low_diff
+        # Proper DM calculation
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
         
-        # Calculate smoothed values using Wilder's smoothing
+        # Convert to Series with proper index
+        plus_dm = pd.Series(plus_dm, index=df.index)
+        minus_dm = pd.Series(minus_dm, index=df.index)
+        
+        # Wilder's smoothing
         def wilder_smooth(series, length):
+            series = pd.Series(series)
             # First value is SMA
-            smooth = series.rolling(window=length).mean()
+            smooth = series.rolling(window=length, min_periods=length).mean()
             # Calculate subsequent values using Wilder's smoothing
             for i in range(length, len(series)):
                 smooth.iloc[i] = (smooth.iloc[i-1] * (length-1) + series.iloc[i]) / length
             return smooth
         
+        # Apply smoothing
         tr_smooth = wilder_smooth(tr, length)
         plus_dm_smooth = wilder_smooth(plus_dm, length)
         minus_dm_smooth = wilder_smooth(minus_dm, length)
@@ -91,6 +101,30 @@ def calculate_dmi(df, length=14, smoothing=14):
         # Calculate ADX
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         adx = wilder_smooth(dx, smoothing)
+        
+        # Replace NaN with 0
+        plus_di = plus_di.fillna(0)
+        minus_di = minus_di.fillna(0)
+        adx = adx.fillna(0)
+        
+        # Debug info
+        st.write("DMI Calculation Details:")
+        debug_df = pd.DataFrame({
+            'High': df['High'],
+            'Low': df['Low'],
+            'Close': df['Close'],
+            'TR': tr,
+            'TR_smooth': tr_smooth,
+            '+DM': plus_dm,
+            '-DM': minus_dm,
+            '+DM_smooth': plus_dm_smooth,
+            '-DM_smooth': minus_dm_smooth,
+            '+DI': plus_di,
+            '-DI': minus_di,
+            'DX': dx,
+            'ADX': adx
+        })
+        st.dataframe(debug_df.tail())
         
         return plus_di, minus_di, adx
         
