@@ -242,24 +242,57 @@ def fetch_data(symbol, timeframe):
         # Create a Ticker object
         ticker = yf.Ticker(symbol)
         
-        # Download data
-        data = ticker.history(
-            start=start_date,
-            end=end_date,
-            interval=interval,
-            auto_adjust=True
-        )
-        
-        if data.empty:
-            return None
-            
-        if len(data) < 30:
-            return None
-            
-        return data
-        
+        # Download data with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                data = ticker.history(
+                    start=start_date,
+                    end=end_date,
+                    interval=interval,
+                    auto_adjust=True,
+                    prepost=False,  # Exclude pre/post market data
+                    actions=False,   # Exclude dividends and splits
+                    repair=True      # Repair missing data
+                )
+                
+                if data.empty:
+                    if attempt < max_retries - 1:
+                        time.sleep(1)  # Wait before retry
+                        continue
+                    return None
+                
+                if len(data) < 30:
+                    if attempt < max_retries - 1:
+                        # Try getting more data
+                        start_date = start_date - timedelta(days=30)
+                        continue
+                    return None
+                
+                # Ensure all required columns exist
+                required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                if not all(col in data.columns for col in required_columns):
+                    if attempt < max_retries - 1:
+                        continue
+                    return None
+                
+                # Clean data
+                data = data.dropna()
+                
+                if len(data) < 30:
+                    return None
+                
+                return data
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                st.error(f"Error fetching data for {symbol}: {str(e)}")
+                return None
+                
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        st.error(f"Error in fetch_data for {symbol}: {str(e)}")
         return None
 
 def analyze_symbol(data):
