@@ -394,41 +394,57 @@ def main():
     # Table styling
     st.markdown("""
     <style>
-    .stDataFrame td, .stDataFrame th {
-        padding: 5px;
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+    }
+    th, td {
+        border: 1px solid gray;
+        padding: 8px;
         text-align: center;
-        font-size: 14px;
+    }
+    th {
+        background-color: #f8f9fa;
+    }
+    .timeframe-header {
+        text-align: center;
+        font-weight: bold;
+        background-color: #f8f9fa;
+    }
+    .symbol-cell {
+        font-weight: normal;
+        text-align: left;
     }
     </style>
     """, unsafe_allow_html=True)
     
     # Create HTML table
-    html_table = "<table style='width:100%; border-collapse: collapse;'>"
+    html_table = "<table>"
     
-    # Header
-    html_table += "<tr><th></th>"
+    # Main header row with timeframes
+    html_table += "<tr><td></td>"
     for tf in TIMEFRAMES.keys():
-        html_table += f"<th colspan='4' style='text-align:center; border:1px solid gray;'>{tf}</th>"
+        html_table += f"<td colspan='4' class='timeframe-header'>{tf}</td>"
     html_table += "</tr>"
     
-    # Subheader
-    html_table += "<tr><th style='border:1px solid gray;'>Symbol</th>"
+    # Sub-header row with columns
+    html_table += "<tr><th>Symbol</th>"
     for _ in TIMEFRAMES.keys():
-        for col in ['Get', 'Set', 'Go', 'Trend']:
-            html_table += f"<th style='border:1px solid gray;'>{col}</th>"
+        html_table += "<th>Get</th><th>Set</th><th>Go</th><th>Trend</th>"
     html_table += "</tr>"
     
     # Data rows
     for symbol in symbols:
-        html_table += f"<tr><td style='border:1px solid gray;'>{symbol}</td>"
+        html_table += f"<tr><td class='symbol-cell'>{symbol}</td>"
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
                 if isinstance(value, tuple):
                     text, color = value
-                    html_table += f"<td style='border:1px solid gray; color:{color};'>{text}</td>"
+                    html_table += f"<td style='color:{color};'>{text}</td>"
                 else:
-                    html_table += f"<td style='border:1px solid gray;'>{value}</td>"
+                    html_table += f"<td>{value}</td>"
         html_table += "</tr>"
     
     html_table += "</table>"
@@ -441,4 +457,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
