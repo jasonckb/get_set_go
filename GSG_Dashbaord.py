@@ -8,49 +8,7 @@ import time
 # Set page config
 st.set_page_config(layout="wide", page_title="Stock DMI MACD States Dashboard")
 
-# Portfolio definitions
-default_stocks = {
-    "HK Stocks": ["^HSI"] + [
-        "0001.HK", "0003.HK", "0005.HK", "0006.HK", "0011.HK", "0012.HK", "0016.HK", "0017.HK",
-        "0019.HK", "0020.HK", "0027.HK", "0066.HK", "0175.HK", "0241.HK", "0267.HK", "0268.HK",
-        "0285.HK", "0288.HK", "0291.HK", "0293.HK", "0358.HK", "0386.HK", "0388.HK", "0522.HK",
-        "0669.HK", "0688.HK", "0700.HK", "0762.HK", "0772.HK", "0799.HK", "0823.HK", "0836.HK",
-        "0853.HK", "0857.HK", "0868.HK", "0883.HK", "0909.HK", "0914.HK", "0916.HK", "0939.HK",
-        "0941.HK", "0960.HK", "0968.HK", "0981.HK", "0992.HK", "1024.HK", "1038.HK", "1044.HK",
-        "1093.HK", "1109.HK", "1113.HK", "1177.HK", "1211.HK", "1299.HK", "1347.HK", "1398.HK",
-        "1772.HK", "1776.HK", "1787.HK", "1801.HK", "1810.HK", "1818.HK", "1833.HK", "1876.HK",
-        "1898.HK", "1928.HK", "1929.HK", "1997.HK", "2007.HK", "2013.HK", "2015.HK", "2018.HK",
-        "2269.HK", "2313.HK", "2318.HK", "2319.HK", "2331.HK", "2333.HK", "2382.HK", "2388.HK",
-        "2518.HK", "2628.HK", "3690.HK", "3888.HK", "3888.HK", "3968.HK", "6060.HK", "6078.HK",
-        "6098.HK", "6618.HK", "6690.HK", "6862.HK", "9618.HK", "9626.HK", "9698.HK", "9888.HK",
-        "9961.HK", "9988.HK", "9999.HK"
-    ],
-    "US Stocks": ["^NDX", "^SPX"] + [
-        "AAPL", "ABBV", "ABNB", "ACN", "ADBE", "AMD", "AMGN", "AMZN", "AMT", "ASML",
-        "AVGO", "BA", "BKNG", "BLK", "CAT", "CCL", "CDNS", "CEG", "CHTR", "COST", 
-        "CRM", "CRWD", "CVS", "CVX", "DDOG", "DE", "DIS", "EQIX", "FTNT", "GE",
-        "GILD", "GOOG", "GS", "HD", "IBM", "ICE", "IDXX", "INTC", "INTU", "ISRG",
-        "JNJ", "JPM", "KO", "LEN", "LLY", "LRCX", "MA", "META", "MMM", "MRK", 
-        "MS", "MSFT", "MU", "NEE", "NFLX", "NRG", "NVO", "NVDA", "OXY", "PANW",
-        "PFE", "PG", "PGR", "PLTR", "PYPL", "QCOM", "REGN", "SBUX", "SMH", "SNOW",
-        "SPGI", "TEAM", "TJX", "TRAV", "TSM", "TSLA", "TTD", "TXN", "UNH", "UPS",
-        "V", "VST", "VZ", "WMT", "XOM", "ZS",
-        "XLB", "XLE", "XLF", "XLI", "XLK", "XLP", "XLU", "XLV", "XLRE", "XLY"
-    ],
-    "World Index": [
-        "^SPX", "^NDX", "^RUT", "^SOX", "^TNX", "^DJI", "^HSI", "3032.HK", "XIN9.FGI", 
-        "^N225", "^BSESN", "^KS11", "^TWII", "^GDAXI", "^FTSE", "^FCHI", "^BVSP", "EEMA", 
-        "EEM", "^HUI", "CL=F", "GC=F", "HG=F", "SI=F", "DX-Y.NYB", "BTC=F", "ETH=F"
-    ]
-}
-
-TIMEFRAMES = {
-    "Weekly": "1wk",
-    "Daily": "1d",
-    "Hourly": "1h"
-}
-
-# [Previous imports and portfolio definitions remain the same]
+# [Previous portfolio definitions remain the same]
 
 def calculate_dmi(df, length=14, smoothing=14):
     try:
@@ -99,6 +57,29 @@ def calculate_dmi(df, length=14, smoothing=14):
     except Exception as e:
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
+
+def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
+    try:
+        close = df['Close'].copy()
+        
+        # Calculate EMAs with alpha adjustment
+        alpha_fast = 2 / (fast_length + alpha_adj)
+        alpha_slow = 2 / (slow_length + alpha_adj)
+        alpha_signal = 2 / (signal_length + alpha_adj)
+        
+        # Calculate MACD line
+        fast_ma = close.ewm(alpha=alpha_fast, adjust=False).mean()
+        slow_ma = close.ewm(alpha=alpha_slow, adjust=False).mean()
+        macd = fast_ma - slow_ma
+        
+        # Calculate Signal line
+        signal = macd.ewm(alpha=alpha_signal, adjust=False).mean()
+        
+        return macd, signal
+        
+    except Exception as e:
+        st.error(f"Error in MACD calculation: {str(e)}")
+        return None, None
 
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
@@ -212,9 +193,6 @@ def get_trend(total_score):
         else:
             return f"Sell ({total_score})", "red"
     return "", "white"  # Empty string for neutral trend
-
-# [Rest of the code remains the same]
-
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
