@@ -135,21 +135,18 @@ def get_state(plus_di, minus_di, adx):
         last_minus = minus_di.iloc[-1]
         last_adx = adx.iloc[-1]
         prev_adx = adx.iloc[-2]
-        
-        # Strong trend threshold
-        strong_trend = last_adx > 25
-        
+                
         if cross_up.iloc[-1]:
             return 4, "Bullish++"
         elif cross_down.iloc[-1]:
             return -4, "Bearish++"
         elif last_plus > last_minus:
-            if strong_trend and last_adx > prev_adx:
+            if last_adx > prev_adx:
                 return 4, "Bullish+"
             else:
                 return 3, "Bullish-"
         else:
-            if strong_trend and last_adx > prev_adx:
+            if last_adx > prev_adx:
                 return -4, "Bearish+"
             else:
                 return -3, "Bearish-"
@@ -170,20 +167,18 @@ def set_state(macd):
         cross_down = (macd.shift(1) >= 0) & (macd < 0)
         
         # Get momentum
-        momentum = macd.diff()
-        strong_momentum = abs(momentum.iloc[-1]) > abs(momentum.iloc[-2])
-        
+                
         if cross_up.iloc[-1]:
             return 3, "Set Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Set Bearish++"
         elif macd.iloc[-1] > 0:
-            if strong_momentum and macd.iloc[-1] > macd.iloc[-2]:
+            if  macd.iloc[-1] > macd.iloc[-2]:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if strong_momentum and macd.iloc[-1] < macd.iloc[-2]:
+            if  macd.iloc[-1] < macd.iloc[-2]:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
@@ -204,20 +199,18 @@ def go_state(signal):
         cross_down = (signal.shift(1) >= 0) & (signal < 0)
         
         # Get momentum
-        momentum = signal.diff()
-        strong_momentum = abs(momentum.iloc[-1]) > abs(momentum.iloc[-2])
-        
+                
         if cross_up.iloc[-1]:
             return 3, "Go Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Go Bearish++"
         elif signal.iloc[-1] > 0:
-            if strong_momentum and signal.iloc[-1] > signal.iloc[-2]:
+            if  signal.iloc[-1] > signal.iloc[-2]:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if strong_momentum and signal.iloc[-1] < signal.iloc[-2]:
+            if  signal.iloc[-1] < signal.iloc[-2]:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
