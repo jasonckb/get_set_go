@@ -53,26 +53,27 @@ TIMEFRAMES = {
 def calculate_dmi(df, length=14, smoothing=14):
     try:
         # Create copies to avoid modifying original data
-        high = df['High'].copy()
-        low = df['Low'].copy()
-        close = df['Close'].copy()
+        df = df.copy()
         
         # Calculate True Range
-        tr1 = high - low
-        tr2 = (high - close.shift(1)).abs()
-        tr3 = (low - close.shift(1)).abs()
+        tr1 = df['High'] - df['Low']
+        tr2 = (df['High'] - df['Close'].shift(1)).abs()
+        tr3 = (df['Low'] - df['Close'].shift(1)).abs()
         tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         
         # Calculate Directional Movement
-        up_move = high - high.shift(1)
-        down_move = low.shift(1) - low
+        high_diff = df['High'] - df['High'].shift(1)
+        low_diff = df['Low'].shift(1) - df['Low']
         
-        # Create +DM and -DM
+        # Calculate +DM and -DM
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_dm.loc[(up_move > down_move) & (up_move > 0)] = up_move
-        minus_dm.loc[(down_move > up_move) & (down_move > 0)] = down_move
+        plus_condition = (high_diff > low_diff) & (high_diff > 0)
+        minus_condition = (low_diff > high_diff) & (low_diff > 0)
+        
+        plus_dm[plus_condition] = high_diff[plus_condition]
+        minus_dm[minus_condition] = low_diff[minus_condition]
         
         # Calculate smoothed values
         alpha = 1.0 / length
@@ -114,14 +115,26 @@ def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_ad
         st.error(f"Error in MACD calculation: {str(e)}")
         return None, None
 
+def check_crossover(series1, series2):
+    """Check if series1 crosses above series2"""
+    prev_diff = (series1.shift(1) - series2.shift(1))
+    curr_diff = (series1 - series2)
+    return (prev_diff <= 0) & (curr_diff > 0)
+
+def check_crossunder(series1, series2):
+    """Check if series1 crosses below series2"""
+    prev_diff = (series1.shift(1) - series2.shift(1))
+    curr_diff = (series1 - series2)
+    return (prev_diff >= 0) & (curr_diff < 0)
+
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
     
     try:
         # Check crossovers
-        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
-        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
+        cross_up = check_crossover(plus_di, minus_di)
+        cross_down = check_crossunder(plus_di, minus_di)
         
         if cross_up.iloc[-1]:
             return 4, "Bullish++"
@@ -150,8 +163,8 @@ def set_state(macd):
         zero_line = pd.Series(0, index=macd.index)
         
         # Check crossovers
-        cross_up = (macd.shift(1) <= 0) & (macd > 0)
-        cross_down = (macd.shift(1) >= 0) & (macd < 0)
+        cross_up = check_crossover(macd, zero_line)
+        cross_down = check_crossunder(macd, zero_line)
         
         if cross_up.iloc[-1]:
             return 3, "Set Bullish++"
@@ -180,8 +193,8 @@ def go_state(signal):
         zero_line = pd.Series(0, index=signal.index)
         
         # Check crossovers
-        cross_up = (signal.shift(1) <= 0) & (signal > 0)
-        cross_down = (signal.shift(1) >= 0) & (signal < 0)
+        cross_up = check_crossover(signal, zero_line)
+        cross_down = check_crossunder(signal, zero_line)
         
         if cross_up.iloc[-1]:
             return 3, "Go Bullish++"
@@ -210,23 +223,62 @@ def get_trend(total_score):
     return f"Neutral ({total_score})", "white"
 
 def fetch_data(symbol, timeframe):
+    """
+    Fetch data for a given symbol and timeframe
+    """
     try:
+        # Show fetching status
+        status_container = st.empty()
+        status_container.info(f"Fetching {timeframe} data for {symbol}...")
+        
         end_date = datetime.now()
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
+            interval = "1h"
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
+            interval = "1d"
         else:  # Weekly
             start_date = end_date - timedelta(days=365)
+            interval = "1wk"
         
-        data = yf.download(symbol, start=start_date, end=end_date, interval=timeframe)
-        
-        if data.empty or len(data) < 30:
-            return None
-            
-        return data
+        # Add retry mechanism
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                data = yf.download(
+                    symbol,
+                    start=start_date,
+                    end=end_date,
+                    interval=interval,
+                    progress=False,
+                    show_errors=True
+                )
+                
+                if data.empty:
+                    status_container.warning(f"No data available for {symbol} on {timeframe} timeframe")
+                    return None
+                
+                if len(data) < 30:
+                    status_container.warning(f"Insufficient data points for {symbol} on {timeframe} timeframe (got {len(data)}, need at least 30)")
+                    return None
+                
+                # Show success message and clear container
+                status_container.success(f"Successfully fetched {len(data)} data points for {symbol}")
+                time.sleep(0.5)  # Show success message briefly
+                status_container.empty()
+                return data
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    status_container.warning(f"Attempt {attempt + 1} failed for {symbol}. Retrying...")
+                    time.sleep(1)  # Wait before retrying
+                else:
+                    status_container.error(f"Failed to fetch data for {symbol} after {max_retries} attempts: {str(e)}")
+                    return None
+                
     except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        st.error(f"Error in fetch_data for {symbol}: {str(e)}")
         return None
 
 def analyze_symbol(data):
@@ -283,7 +335,7 @@ def main():
     current_iteration = 0
     
     for symbol in symbols:
-        status_text.text(f"Analyzing {symbol}...")
+        status_text.text(f"Processing {symbol}...")
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
             analysis = analyze_symbol(data)
