@@ -272,12 +272,37 @@ def analyze_symbol(data):
         }
     
     try:
+        # Show raw data
+        st.write("Raw Data Last 5 Rows:")
+        st.dataframe(data.tail())
+        
+        # Calculate indicators
         plus_di, minus_di, adx = calculate_dmi(data)
         macd, signal = calculate_macd(data)
         
+        # Show calculations
+        st.write("Technical Indicators Last 5 Rows:")
+        indicators_df = pd.DataFrame({
+            'plus_di': plus_di,
+            'minus_di': minus_di,
+            'adx': adx,
+            'macd': macd,
+            'signal': signal
+        })
+        st.dataframe(indicators_df.tail())
+        
+        # Get states
         get_val, get_str = get_state(plus_di, minus_di, adx)
-        set_val, set_str = set_state(signal)  # Using signal line for Set state
-        go_val, go_str = go_state(macd)      # Using MACD line for Go state
+        set_val, set_str = set_state(signal)
+        go_val, go_str = go_state(macd)
+        
+        # Show state calculations
+        st.write("State Values:")
+        st.write({
+            'Get': (get_val, get_str),
+            'Set': (set_val, set_str),
+            'Go': (go_val, go_str)
+        })
         
         total_score = get_val + set_val + go_val
         trend, color = get_trend(total_score)
