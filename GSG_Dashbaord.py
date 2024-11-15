@@ -51,53 +51,72 @@ TIMEFRAMES = {
 }
 
 def calculate_dmi(df, length=14, smoothing=14):
-    high = df['High']
-    low = df['Low']
-    close = df['Close']
-    
-    # True Range
-    tr1 = high - low
-    tr2 = abs(high - close.shift(1))
-    tr3 = abs(low - close.shift(1))
-    tr = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3}).max(axis=1)
-    
-    # Directional Movement
-    up_move = high - high.shift(1)
-    down_move = low.shift(1) - low
-    
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
-    
-    # Smoothing using RMA (Similar to PineScript's rma function)
-    def rma(series, length):
-        alpha = 1.0 / length
-        return series.ewm(alpha=alpha, adjust=False).mean()
-    
-    tr_rma = rma(tr, length)
-    plus_di = 100 * rma(pd.Series(plus_dm), length) / tr_rma
-    minus_di = 100 * rma(pd.Series(minus_dm), length) / tr_rma
-    
-    # ADX
-    dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = rma(dx, smoothing)
-    
-    return plus_di, minus_di, adx
+    try:
+        high = df['High']
+        low = df['Low']
+        close = df['Close']
+        
+        # Calculate True Range
+        tr1 = high - low
+        tr2 = abs(high - close.shift(1))
+        tr3 = abs(low - close.shift(1))
+        
+        # Use max along axis for True Range
+        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        
+        # Calculate Directional Movement
+        up_move = high - high.shift(1)
+        down_move = low.shift(1) - low
+        
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        
+        # Calculate smoothed values using RMA
+        def rma(series, length):
+            alpha = 1.0 / length
+            return series.ewm(alpha=alpha, adjust=False).mean()
+        
+        tr_rma = rma(tr, length)
+        plus_di = 100 * rma(pd.Series(plus_dm, index=df.index), length) / tr_rma
+        minus_di = 100 * rma(pd.Series(minus_dm, index=df.index), length) / tr_rma
+        
+        # Calculate ADX
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        adx = rma(dx, smoothing)
+        
+        return plus_di, minus_di, adx
+    except Exception as e:
+        st.error(f"Error in DMI calculation: {str(e)}")
+        return None, None, None
+
+def crossover(series1, series2):
+    return (series1.shift(1) <= series2.shift(1)) & (series1 > series2)
+
+def crossunder(series1, series2):
+    return (series1.shift(1) >= series2.shift(1)) & (series1 < series2)
 
 def custom_ema(series, length, alpha_adj=19):
     alpha = 2 / (length + alpha_adj)
     return series.ewm(alpha=alpha, adjust=False).mean()
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
-    close = df['Close']
-    fast_ma = custom_ema(close, fast_length, alpha_adj)
-    slow_ma = custom_ema(close, slow_length, alpha_adj)
-    macd = fast_ma - slow_ma
-    signal = custom_ema(macd, signal_length, alpha_adj)
-    return macd, signal
+    try:
+        close = df['Close']
+        fast_ma = custom_ema(close, fast_length, alpha_adj)
+        slow_ma = custom_ema(close, slow_length, alpha_adj)
+        macd = fast_ma - slow_ma
+        signal = custom_ema(macd, signal_length, alpha_adj)
+        return macd, signal
+    except Exception as e:
+        st.error(f"Error in MACD calculation: {str(e)}")
+        return None, None
 
 def get_state(plus_di, minus_di, adx):
-    dmi_cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
-    dmi_cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
+    if plus_di is None or minus_di is None or adx is None:
+        return 0, "N/A"
+        
+    dmi_cross_up = crossover(plus_di, minus_di)
+    dmi_cross_down = crossunder(plus_di, minus_di)
     
     if dmi_cross_up.iloc[-1]:
         return 4, "Bullish++"
@@ -115,12 +134,16 @@ def get_state(plus_di, minus_di, adx):
             return -3, "Bearish-"
 
 def set_state(macd):
-    cross_up = (macd.shift(1) <= 0) & (macd > 0)
-    cross_down = (macd.shift(1) >= 0) & (macd < 0)
+    if macd is None:
+        return 0, "N/A"
+        
+    zero_series = pd.Series(0, index=macd.index)
+    cross_zero_up = crossover(macd, zero_series)
+    cross_zero_down = crossunder(macd, zero_series)
     
-    if cross_up.iloc[-1]:
+    if cross_zero_up.iloc[-1]:
         return 3, "Set Bullish++"
-    elif cross_down.iloc[-1]:
+    elif cross_zero_down.iloc[-1]:
         return -3, "Set Bearish++"
     elif macd.iloc[-1] > 0:
         if macd.iloc[-1] > macd.iloc[-2]:
@@ -134,12 +157,16 @@ def set_state(macd):
             return -1, "Bearish-"
 
 def go_state(signal):
-    cross_up = (signal.shift(1) <= 0) & (signal > 0)
-    cross_down = (signal.shift(1) >= 0) & (signal < 0)
+    if signal is None:
+        return 0, "N/A"
+        
+    zero_series = pd.Series(0, index=signal.index)
+    cross_zero_up = crossover(signal, zero_series)
+    cross_zero_down = crossunder(signal, zero_series)
     
-    if cross_up.iloc[-1]:
+    if cross_zero_up.iloc[-1]:
         return 3, "Go Bullish++"
-    elif cross_down.iloc[-1]:
+    elif cross_zero_down.iloc[-1]:
         return -3, "Go Bearish++"
     elif signal.iloc[-1] > 0:
         if signal.iloc[-1] > signal.iloc[-2]:
@@ -153,26 +180,29 @@ def go_state(signal):
             return -1, "Bearish-"
 
 def get_trend(total_score):
-    if total_score >= 5:
-        return f"Buy ({total_score})", "green"
-    elif total_score <= -5:
-        return f"Sell ({total_score})", "red"
-    else:
-        return f"Neutral ({total_score})", "white"
+    if abs(total_score) >= 5:
+        if total_score > 0:
+            return f"Buy ({total_score})", "green"
+        else:
+            return f"Sell ({total_score})", "red"
+    return f"Neutral ({total_score})", "white"
 
 def fetch_data(symbol, timeframe):
-    end_date = datetime.now()
-    if timeframe == "1h":
-        start_date = end_date - timedelta(days=7)
-    elif timeframe == "1d":
-        start_date = end_date - timedelta(days=100)
-    else:  # Weekly
-        start_date = end_date - timedelta(days=365)
-    
     try:
+        end_date = datetime.now()
+        if timeframe == "1h":
+            start_date = end_date - timedelta(days=7)
+        elif timeframe == "1d":
+            start_date = end_date - timedelta(days=100)
+        else:  # Weekly
+            start_date = end_date - timedelta(days=365)
+        
         data = yf.download(symbol, start=start_date, end=end_date, interval=timeframe)
-        if len(data) < 30:  # Ensure enough data for calculations
+        
+        if data.empty or len(data) < 30:
+            st.warning(f"Insufficient data for {symbol} on {timeframe} timeframe")
             return None
+            
         return data
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
@@ -180,29 +210,38 @@ def fetch_data(symbol, timeframe):
 
 def analyze_symbol(data):
     if data is None or len(data) < 30:
+        return {
+            "Get": ("N/A", "white"),
+            "Set": ("N/A", "white"),
+            "Go": ("N/A", "white"),
+            "Trend": ("N/A", "white")
+        }
+    
+    try:
+        plus_di, minus_di, adx = calculate_dmi(data)
+        macd, signal = calculate_macd(data)
+        
+        get_val, get_str = get_state(plus_di, minus_di, adx)
+        set_val, set_str = set_state(macd)
+        go_val, go_str = go_state(signal)
+        
+        total_score = get_val + set_val + go_val
+        trend, color = get_trend(total_score)
+        
+        return {
+            "Get": (get_str, "green" if get_val > 0 else "red" if get_val < 0 else "white"),
+            "Set": (set_str, "green" if set_val > 0 else "red" if set_val < 0 else "white"),
+            "Go": (go_str, "green" if go_val > 0 else "red" if go_val < 0 else "white"),
+            "Trend": (trend, color)
+        }
+    except Exception as e:
+        st.error(f"Error in analysis: {str(e)}")
         return None
-    
-    plus_di, minus_di, adx = calculate_dmi(data)
-    macd, signal = calculate_macd(data)
-    
-    get_val, get_str = get_state(plus_di, minus_di, adx)
-    set_val, set_str = set_state(macd)
-    go_val, go_str = go_state(signal)
-    
-    total_score = get_val + set_val + go_val
-    trend, color = get_trend(total_score)
-    
-    return {
-        "Get": (get_str, "green" if get_val > 0 else "red"),
-        "Set": (set_str, "green" if set_val > 0 else "red"),
-        "Go": (go_str, "green" if go_val > 0 else "red"),
-        "Trend": (trend, color)
-    }
 
 def main():
     st.title("Stock DMI MACD States Dashboard")
     
-    # Sidebar
+    # Sidebar for portfolio selection
     st.sidebar.title("Settings")
     selected_portfolio = st.sidebar.selectbox(
         "Select Portfolio",
@@ -211,7 +250,7 @@ def main():
     
     symbols = default_stocks[selected_portfolio]
     
-    # Results DataFrame
+    # Create empty DataFrame for results
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
     
