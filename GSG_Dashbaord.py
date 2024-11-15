@@ -227,6 +227,9 @@ def get_trend(total_score):
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
+    """
+    Fetch data for a given symbol and timeframe with data validation
+    """
     try:
         end_date = datetime.now()
         if timeframe == "1h":
@@ -238,61 +241,62 @@ def fetch_data(symbol, timeframe):
         else:  # Weekly
             start_date = end_date - timedelta(days=365)
             interval = "1wk"
-        
-        # Create a Ticker object
-        ticker = yf.Ticker(symbol)
-        
-        # Download data with retries
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                data = ticker.history(
-                    start=start_date,
-                    end=end_date,
-                    interval=interval,
-                    auto_adjust=True,
-                    prepost=False,  # Exclude pre/post market data
-                    actions=False,   # Exclude dividends and splits
-                    repair=True      # Repair missing data
-                )
-                
-                if data.empty:
-                    if attempt < max_retries - 1:
-                        time.sleep(1)  # Wait before retry
-                        continue
-                    return None
-                
-                if len(data) < 30:
-                    if attempt < max_retries - 1:
-                        # Try getting more data
-                        start_date = start_date - timedelta(days=30)
-                        continue
-                    return None
-                
-                # Ensure all required columns exist
-                required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                if not all(col in data.columns for col in required_columns):
-                    if attempt < max_retries - 1:
-                        continue
-                    return None
-                
-                # Clean data
-                data = data.dropna()
-                
-                if len(data) < 30:
-                    return None
-                
-                return data
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(1)
-                    continue
-                st.error(f"Error fetching data for {symbol}: {str(e)}")
+
+        # For HK stocks, ensure proper formatting
+        if ".HK" in symbol and not symbol.startswith("^"):
+            # Add leading zeros if needed
+            code = symbol.split(".")[0]
+            if len(code) < 4:
+                symbol = f"{int(code):04d}.HK"
+
+        # Download data
+        data = yf.download(
+            symbol,
+            start=start_date,
+            end=end_date,
+            interval=interval,
+            progress=False,
+            show_errors=False,
+            ignore_tz=True
+        )
+
+        # Data validation
+        if data is None or data.empty:
+            st.warning(f"No data available for {symbol}")
+            return None
+
+        # Check for required columns
+        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        if not all(col in data.columns for col in required_cols):
+            st.warning(f"Missing required columns for {symbol}")
+            return None
+
+        # Check for sufficient data points
+        if len(data) < 30:
+            st.warning(f"Insufficient data points for {symbol} (got {len(data)}, need 30)")
+            return None
+
+        # Check for NaN values
+        if data[required_cols].isna().any().any():
+            # Drop rows with NaN values
+            data = data.dropna(subset=required_cols)
+            if len(data) < 30:
+                st.warning(f"Insufficient valid data points after cleaning for {symbol}")
                 return None
-                
+
+        # Debug info
+        st.debug(f"""
+        Data validation for {symbol}:
+        - Timeframe: {timeframe}
+        - Data points: {len(data)}
+        - Date range: {data.index[0]} to {data.index[-1]}
+        - Columns: {list(data.columns)}
+        """)
+
+        return data
+
     except Exception as e:
-        st.error(f"Error in fetch_data for {symbol}: {str(e)}")
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
 def analyze_symbol(data):
