@@ -271,9 +271,11 @@ def main():
     st.sidebar.title("Settings")
     selected_portfolio = st.sidebar.selectbox(
         "Select Portfolio",
-        list(default_stocks.keys())
+        options=list(default_stocks.keys()),
+        key="portfolio_selector"
     )
     
+    # Get selected symbols
     symbols = default_stocks[selected_portfolio]
     
     # Create empty DataFrame for results
