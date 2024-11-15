@@ -138,14 +138,14 @@ def get_state(plus_di, minus_di, adx):
             return 4, "Get Bullish++"
         elif cross_down.iloc[-1]:
             return -4, "Get Bearish++"
-        elif above_di:
+        elif above_di:  # Bullish
             if adx_advancing:
                 return 4, "Get Bullish+"
             else:
                 return 3, "Get Bullish-"
-        else:
+        else:  # Bearish
             if adx_advancing:
-                return -4, "Get Bearish+"
+                return -4, "Get Bearish+"  # ADX advancing is strong in both cases
             else:
                 return -3, "Get Bearish-"
                 
@@ -170,16 +170,16 @@ def set_state(signal):
             return 3, "Set Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Set Bearish++"
-        elif above_zero:
+        elif above_zero:  # Bullish
             if advancing:
                 return 2, "Set Bullish+"
             else:
                 return 1, "Set Bullish-"
-        else:
-            if not advancing:  # declining
-                return -2, "Set Bearish+"
+        else:  # Bearish
+            if advancing:
+                return -1, "Set Bearish-"  # Advancing is weaker in bearish
             else:
-                return -1, "Set Bearish-"
+                return -2, "Set Bearish+"  # Declining is stronger in bearish
                 
     except Exception as e:
         st.error(f"Error in set_state: {str(e)}")
@@ -202,16 +202,16 @@ def go_state(macd):
             return 3, "Go Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Go Bearish++"
-        elif above_zero:
+        elif above_zero:  # Bullish
             if advancing:
                 return 2, "Go Bullish+"
             else:
                 return 1, "Go Bullish-"
-        else:
-            if not advancing:  # declining
-                return -2, "Go Bearish+"
+        else:  # Bearish
+            if advancing:
+                return -1, "Go Bearish-"  # Advancing is weaker in bearish
             else:
-                return -1, "Go Bearish-"
+                return -2, "Go Bearish+"  # Declining is stronger in bearish
                 
     except Exception as e:
         st.error(f"Error in go_state: {str(e)}")
