@@ -50,54 +50,66 @@ TIMEFRAMES = {
     "Hourly": "1h"
 }
 
+def rma(series, length):
+    """Calculate Rolling Moving Average"""
+    alpha = 1.0 / length
+    return series.ewm(alpha=alpha, min_periods=length, adjust=False).mean()
+
 def calculate_dmi(df, length=14, smoothing=14):
     try:
-        high = df['High']
-        low = df['Low']
-        close = df['Close']
+        # Ensure all data is properly aligned
+        df = df.copy()
+        
+        # Calculate price changes
+        high_change = df['High'] - df['High'].shift(1)
+        low_change = df['Low'].shift(1) - df['Low']
         
         # Calculate True Range
-        tr1 = high - low
-        tr2 = abs(high - close.shift(1))
-        tr3 = abs(low - close.shift(1))
-        
-        # Use max along axis for True Range
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        tr = pd.DataFrame({
+            'hl': df['High'] - df['Low'],
+            'hc': abs(df['High'] - df['Close'].shift(1)),
+            'lc': abs(df['Low'] - df['Close'].shift(1))
+        }).max(axis=1)
         
         # Calculate Directional Movement
-        up_move = high - high.shift(1)
-        down_move = low.shift(1) - low
+        plus_dm = pd.Series(0.0, index=df.index)
+        minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        # Set conditions for +DM and -DM
+        plus_dm = pd.Series(np.where(
+            (high_change > low_change) & (high_change > 0),
+            high_change,
+            0
+        ), index=df.index)
         
-        # Calculate smoothed values using RMA
-        def rma(series, length):
-            alpha = 1.0 / length
-            return series.ewm(alpha=alpha, adjust=False).mean()
+        minus_dm = pd.Series(np.where(
+            (low_change > high_change) & (low_change > 0),
+            low_change,
+            0
+        ), index=df.index)
         
-        tr_rma = rma(tr, length)
-        plus_di = 100 * rma(pd.Series(plus_dm, index=df.index), length) / tr_rma
-        minus_di = 100 * rma(pd.Series(minus_dm, index=df.index), length) / tr_rma
+        # Calculate smoothed values
+        tr_smoothed = rma(tr, length)
+        plus_dm_smoothed = rma(plus_dm, length)
+        minus_dm_smoothed = rma(minus_dm, length)
+        
+        # Calculate DI+ and DI-
+        plus_di = 100 * plus_dm_smoothed / tr_smoothed
+        minus_di = 100 * minus_dm_smoothed / tr_smoothed
         
         # Calculate ADX
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         adx = rma(dx, smoothing)
         
         return plus_di, minus_di, adx
+        
     except Exception as e:
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
 
-def crossover(series1, series2):
-    return (series1.shift(1) <= series2.shift(1)) & (series1 > series2)
-
-def crossunder(series1, series2):
-    return (series1.shift(1) >= series2.shift(1)) & (series1 < series2)
-
 def custom_ema(series, length, alpha_adj=19):
     alpha = 2 / (length + alpha_adj)
-    return series.ewm(alpha=alpha, adjust=False).mean()
+    return series.ewm(alpha=alpha, min_periods=length, adjust=False).mean()
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
@@ -111,73 +123,91 @@ def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_ad
         st.error(f"Error in MACD calculation: {str(e)}")
         return None, None
 
+def crossover(series1, series2):
+    return (series1.shift(1) <= series2.shift(1)) & (series1 > series2)
+
+def crossunder(series1, series2):
+    return (series1.shift(1) >= series2.shift(1)) & (series1 < series2)
+
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
-        
-    dmi_cross_up = crossover(plus_di, minus_di)
-    dmi_cross_down = crossunder(plus_di, minus_di)
     
-    if dmi_cross_up.iloc[-1]:
-        return 4, "Bullish++"
-    elif dmi_cross_down.iloc[-1]:
-        return -4, "Bearish++"
-    elif plus_di.iloc[-1] > minus_di.iloc[-1]:
-        if adx.iloc[-1] > adx.iloc[-2]:
-            return 4, "Bullish+"
+    try:
+        dmi_cross_up = crossover(plus_di, minus_di)
+        dmi_cross_down = crossunder(plus_di, minus_di)
+        
+        if dmi_cross_up.iloc[-1]:
+            return 4, "Bullish++"
+        elif dmi_cross_down.iloc[-1]:
+            return -4, "Bearish++"
+        elif plus_di.iloc[-1] > minus_di.iloc[-1]:
+            if adx.iloc[-1] > adx.iloc[-2]:
+                return 4, "Bullish+"
+            else:
+                return 3, "Bullish-"
         else:
-            return 3, "Bullish-"
-    else:
-        if adx.iloc[-1] > adx.iloc[-2]:
-            return -4, "Bearish+"
-        else:
-            return -3, "Bearish-"
+            if adx.iloc[-1] > adx.iloc[-2]:
+                return -4, "Bearish+"
+            else:
+                return -3, "Bearish-"
+    except Exception as e:
+        st.error(f"Error in get_state: {str(e)}")
+        return 0, "N/A"
 
 def set_state(macd):
     if macd is None:
         return 0, "N/A"
-        
-    zero_series = pd.Series(0, index=macd.index)
-    cross_zero_up = crossover(macd, zero_series)
-    cross_zero_down = crossunder(macd, zero_series)
     
-    if cross_zero_up.iloc[-1]:
-        return 3, "Set Bullish++"
-    elif cross_zero_down.iloc[-1]:
-        return -3, "Set Bearish++"
-    elif macd.iloc[-1] > 0:
-        if macd.iloc[-1] > macd.iloc[-2]:
-            return 2, "Bullish+"
+    try:
+        zero_series = pd.Series(0, index=macd.index)
+        cross_zero_up = crossover(macd, zero_series)
+        cross_zero_down = crossunder(macd, zero_series)
+        
+        if cross_zero_up.iloc[-1]:
+            return 3, "Set Bullish++"
+        elif cross_zero_down.iloc[-1]:
+            return -3, "Set Bearish++"
+        elif macd.iloc[-1] > 0:
+            if macd.iloc[-1] > macd.iloc[-2]:
+                return 2, "Bullish+"
+            else:
+                return 1, "Bullish-"
         else:
-            return 1, "Bullish-"
-    else:
-        if macd.iloc[-1] < macd.iloc[-2]:
-            return -2, "Bearish+"
-        else:
-            return -1, "Bearish-"
+            if macd.iloc[-1] < macd.iloc[-2]:
+                return -2, "Bearish+"
+            else:
+                return -1, "Bearish-"
+    except Exception as e:
+        st.error(f"Error in set_state: {str(e)}")
+        return 0, "N/A"
 
 def go_state(signal):
     if signal is None:
         return 0, "N/A"
-        
-    zero_series = pd.Series(0, index=signal.index)
-    cross_zero_up = crossover(signal, zero_series)
-    cross_zero_down = crossunder(signal, zero_series)
     
-    if cross_zero_up.iloc[-1]:
-        return 3, "Go Bullish++"
-    elif cross_zero_down.iloc[-1]:
-        return -3, "Go Bearish++"
-    elif signal.iloc[-1] > 0:
-        if signal.iloc[-1] > signal.iloc[-2]:
-            return 2, "Bullish+"
+    try:
+        zero_series = pd.Series(0, index=signal.index)
+        cross_zero_up = crossover(signal, zero_series)
+        cross_zero_down = crossunder(signal, zero_series)
+        
+        if cross_zero_up.iloc[-1]:
+            return 3, "Go Bullish++"
+        elif cross_zero_down.iloc[-1]:
+            return -3, "Go Bearish++"
+        elif signal.iloc[-1] > 0:
+            if signal.iloc[-1] > signal.iloc[-2]:
+                return 2, "Bullish+"
+            else:
+                return 1, "Bullish-"
         else:
-            return 1, "Bullish-"
-    else:
-        if signal.iloc[-1] < signal.iloc[-2]:
-            return -2, "Bearish+"
-        else:
-            return -1, "Bearish-"
+            if signal.iloc[-1] < signal.iloc[-2]:
+                return -2, "Bearish+"
+            else:
+                return -1, "Bearish-"
+    except Exception as e:
+        st.error(f"Error in go_state: {str(e)}")
+        return 0, "N/A"
 
 def get_trend(total_score):
     if abs(total_score) >= 5:
@@ -200,7 +230,6 @@ def fetch_data(symbol, timeframe):
         data = yf.download(symbol, start=start_date, end=end_date, interval=timeframe)
         
         if data.empty or len(data) < 30:
-            st.warning(f"Insufficient data for {symbol} on {timeframe} timeframe")
             return None
             
         return data
