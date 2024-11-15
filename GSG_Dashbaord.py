@@ -50,6 +50,8 @@ TIMEFRAMES = {
     "Hourly": "1h"
 }
 
+# [Previous imports and portfolio definitions remain the same]
+
 def calculate_dmi(df, length=14, smoothing=14):
     try:
         df = df.copy()
@@ -64,21 +66,25 @@ def calculate_dmi(df, length=14, smoothing=14):
         high_diff = df['High'] - df['High'].shift(1)
         low_diff = df['Low'].shift(1) - df['Low']
         
-        # Calculate +DM and -DM
+        # Calculate +DM and -DM with proper conditions
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        plus_condition = (high_diff > low_diff) & (high_diff > 0)
-        minus_condition = (low_diff > high_diff) & (low_diff > 0)
+        plus_dm.loc[(high_diff > low_diff) & (high_diff > 0)] = high_diff
+        minus_dm.loc[(low_diff > high_diff) & (low_diff > 0)] = low_diff
         
-        plus_dm[plus_condition] = high_diff[plus_condition]
-        minus_dm[minus_condition] = low_diff[minus_condition]
+        # Calculate smoothed values using Wilder's smoothing
+        def wilder_smooth(series, length):
+            # First value is SMA
+            smooth = series.rolling(window=length).mean()
+            # Calculate subsequent values using Wilder's smoothing
+            for i in range(length, len(series)):
+                smooth.iloc[i] = (smooth.iloc[i-1] * (length-1) + series.iloc[i]) / length
+            return smooth
         
-        # Calculate smoothed values
-        alpha = 1.0 / length
-        tr_smooth = tr.ewm(alpha=alpha, adjust=False).mean()
-        plus_dm_smooth = plus_dm.ewm(alpha=alpha, adjust=False).mean()
-        minus_dm_smooth = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+        tr_smooth = wilder_smooth(tr, length)
+        plus_dm_smooth = wilder_smooth(plus_dm, length)
+        minus_dm_smooth = wilder_smooth(minus_dm, length)
         
         # Calculate +DI and -DI
         plus_di = 100 * plus_dm_smooth / tr_smooth
@@ -86,7 +92,7 @@ def calculate_dmi(df, length=14, smoothing=14):
         
         # Calculate ADX
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-        adx = dx.ewm(alpha=1.0/smoothing, adjust=False).mean()
+        adx = wilder_smooth(dx, smoothing)
         
         return plus_di, minus_di, adx
         
@@ -94,61 +100,39 @@ def calculate_dmi(df, length=14, smoothing=14):
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
 
-def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
-    try:
-        close = df['Close'].copy()
-        
-        # Calculate EMAs
-        alpha_fast = 2 / (fast_length + alpha_adj)
-        alpha_slow = 2 / (slow_length + alpha_adj)
-        alpha_signal = 2 / (signal_length + alpha_adj)
-        
-        fast_ma = close.ewm(alpha=alpha_fast, adjust=False).mean()
-        slow_ma = close.ewm(alpha=alpha_slow, adjust=False).mean()
-        
-        macd = fast_ma - slow_ma
-        signal = macd.ewm(alpha=alpha_signal, adjust=False).mean()
-        
-        return macd, signal
-    except Exception as e:
-        st.error(f"Error in MACD calculation: {str(e)}")
-        return None, None
-
-def check_crossover(series1, series2):
-    """Check if series1 crosses above series2"""
-    prev_diff = (series1.shift(1) - series2.shift(1))
-    curr_diff = (series1 - series2)
-    return (prev_diff <= 0) & (curr_diff > 0)
-
-def check_crossunder(series1, series2):
-    """Check if series1 crosses below series2"""
-    prev_diff = (series1.shift(1) - series2.shift(1))
-    curr_diff = (series1 - series2)
-    return (prev_diff >= 0) & (curr_diff < 0)
-
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
     
     try:
-        # Check crossovers
-        cross_up = check_crossover(plus_di, minus_di)
-        cross_down = check_crossunder(plus_di, minus_di)
+        # Check crossovers with proper thresholds
+        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
+        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
+        
+        # Get last values
+        last_plus = plus_di.iloc[-1]
+        last_minus = minus_di.iloc[-1]
+        last_adx = adx.iloc[-1]
+        prev_adx = adx.iloc[-2]
+        
+        # Strong trend threshold
+        strong_trend = last_adx > 25
         
         if cross_up.iloc[-1]:
             return 4, "Bullish++"
         elif cross_down.iloc[-1]:
             return -4, "Bearish++"
-        elif plus_di.iloc[-1] > minus_di.iloc[-1]:
-            if adx.iloc[-1] > adx.iloc[-2]:
+        elif last_plus > last_minus:
+            if strong_trend and last_adx > prev_adx:
                 return 4, "Bullish+"
             else:
                 return 3, "Bullish-"
         else:
-            if adx.iloc[-1] > adx.iloc[-2]:
+            if strong_trend and last_adx > prev_adx:
                 return -4, "Bearish+"
             else:
                 return -3, "Bearish-"
+                
     except Exception as e:
         st.error(f"Error in get_state: {str(e)}")
         return 0, "N/A"
@@ -158,27 +142,31 @@ def set_state(macd):
         return 0, "N/A"
     
     try:
-        # Create zero series with same index as MACD
         zero_line = pd.Series(0, index=macd.index)
         
-        # Check crossovers
-        cross_up = check_crossover(macd, zero_line)
-        cross_down = check_crossunder(macd, zero_line)
+        # Check crossovers with proper thresholds
+        cross_up = (macd.shift(1) <= 0) & (macd > 0)
+        cross_down = (macd.shift(1) >= 0) & (macd < 0)
+        
+        # Get momentum
+        momentum = macd.diff()
+        strong_momentum = abs(momentum.iloc[-1]) > abs(momentum.iloc[-2])
         
         if cross_up.iloc[-1]:
             return 3, "Set Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Set Bearish++"
         elif macd.iloc[-1] > 0:
-            if macd.iloc[-1] > macd.iloc[-2]:
+            if strong_momentum and macd.iloc[-1] > macd.iloc[-2]:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if macd.iloc[-1] < macd.iloc[-2]:
+            if strong_momentum and macd.iloc[-1] < macd.iloc[-2]:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
+                
     except Exception as e:
         st.error(f"Error in set_state: {str(e)}")
         return 0, "N/A"
@@ -188,27 +176,31 @@ def go_state(signal):
         return 0, "N/A"
     
     try:
-        # Create zero series with same index as signal
         zero_line = pd.Series(0, index=signal.index)
         
-        # Check crossovers
-        cross_up = check_crossover(signal, zero_line)
-        cross_down = check_crossunder(signal, zero_line)
+        # Check crossovers with proper thresholds
+        cross_up = (signal.shift(1) <= 0) & (signal > 0)
+        cross_down = (signal.shift(1) >= 0) & (signal < 0)
+        
+        # Get momentum
+        momentum = signal.diff()
+        strong_momentum = abs(momentum.iloc[-1]) > abs(momentum.iloc[-2])
         
         if cross_up.iloc[-1]:
             return 3, "Go Bullish++"
         elif cross_down.iloc[-1]:
             return -3, "Go Bearish++"
         elif signal.iloc[-1] > 0:
-            if signal.iloc[-1] > signal.iloc[-2]:
+            if strong_momentum and signal.iloc[-1] > signal.iloc[-2]:
                 return 2, "Bullish+"
             else:
                 return 1, "Bullish-"
         else:
-            if signal.iloc[-1] < signal.iloc[-2]:
+            if strong_momentum and signal.iloc[-1] < signal.iloc[-2]:
                 return -2, "Bearish+"
             else:
                 return -1, "Bearish-"
+                
     except Exception as e:
         st.error(f"Error in go_state: {str(e)}")
         return 0, "N/A"
@@ -219,7 +211,10 @@ def get_trend(total_score):
             return f"Buy ({total_score})", "green"
         else:
             return f"Sell ({total_score})", "red"
-    return f"Neutral ({total_score})", "white"
+    return "", "white"  # Empty string for neutral trend
+
+# [Rest of the code remains the same]
+
 
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
