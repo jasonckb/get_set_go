@@ -54,9 +54,6 @@ def calculate_dmi(df, length=14, smoothing=14):
     try:
         df = df.copy()
         
-        # Drop rows with zero or NaN values
-        df = df.replace(0, np.nan).dropna()
-        
         # Calculate True Range
         tr1 = df['High'] - df['Low']
         tr2 = (df['High'] - df['Close'].shift(1)).abs()
@@ -71,25 +68,18 @@ def calculate_dmi(df, length=14, smoothing=14):
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
-        # Proper DM calculation
-        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
-        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
+        plus_dm.loc[(up_move > down_move) & (up_move > 0)] = up_move
+        minus_dm.loc[(down_move > up_move) & (down_move > 0)] = down_move
         
-        # Convert to Series with proper index
-        plus_dm = pd.Series(plus_dm, index=df.index)
-        minus_dm = pd.Series(minus_dm, index=df.index)
-        
-        # Wilder's smoothing
+        # Calculate smoothed values
         def wilder_smooth(series, length):
             series = pd.Series(series)
-            # First value is SMA
-            smooth = series.rolling(window=length, min_periods=length).mean()
-            # Calculate subsequent values using Wilder's smoothing
+            result = pd.Series(index=series.index)
+            result.iloc[0:length] = series.iloc[0:length].mean()
             for i in range(length, len(series)):
-                smooth.iloc[i] = (smooth.iloc[i-1] * (length-1) + series.iloc[i]) / length
-            return smooth
+                result.iloc[i] = (result.iloc[i-1] * (length-1) + series.iloc[i]) / length
+            return result
         
-        # Apply smoothing
         tr_smooth = wilder_smooth(tr, length)
         plus_dm_smooth = wilder_smooth(plus_dm, length)
         minus_dm_smooth = wilder_smooth(minus_dm, length)
@@ -102,14 +92,8 @@ def calculate_dmi(df, length=14, smoothing=14):
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         adx = wilder_smooth(dx, smoothing)
         
-        # Replace NaN with 0
-        plus_di = plus_di.fillna(0)
-        minus_di = minus_di.fillna(0)
-        adx = adx.fillna(0)
-        
-        # Debug info
-        st.write("DMI Calculation Details:")
-        debug_df = pd.DataFrame({
+        # Show calculation details
+        details = pd.DataFrame({
             'High': df['High'],
             'Low': df['Low'],
             'Close': df['Close'],
@@ -124,13 +108,53 @@ def calculate_dmi(df, length=14, smoothing=14):
             'DX': dx,
             'ADX': adx
         })
-        st.dataframe(debug_df.tail())
+        st.write("DMI Calculation Details (Last 5 rows):")
+        st.dataframe(details.tail())
         
         return plus_di, minus_di, adx
         
     except Exception as e:
         st.error(f"Error in DMI calculation: {str(e)}")
         return None, None, None
+
+def get_state(plus_di, minus_di, adx):
+    if plus_di is None or minus_di is None or adx is None:
+        return 0, "N/A"
+    
+    try:
+        # Ensure we have valid data
+        if len(plus_di) < 2 or len(minus_di) < 2 or len(adx) < 2:
+            return 0, "N/A"
+            
+        # Check crossovers
+        cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
+        cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
+        
+        # Get last values safely
+        last_plus = plus_di.iloc[-1]
+        last_minus = minus_di.iloc[-1]
+        last_adx = adx.iloc[-1]
+        prev_adx = adx.iloc[-2]
+        
+        if cross_up.iloc[-1]:
+            return 4, "Get Bullish++"
+        elif cross_down.iloc[-1]:
+            return -4, "Get Bearish++"
+        elif last_plus > last_minus:  # Bullish
+            if last_adx > prev_adx:
+                return 4, "Get Bullish+"
+            else:
+                return 3, "Get Bullish-"
+        else:  # Bearish
+            if last_adx > prev_adx:
+                return -4, "Get Bearish+"
+            else:
+                return -3, "Get Bearish-"
+                
+    except Exception as e:
+        st.error(f"Error in get_state: {str(e)}")
+        return 0, "N/A"
+
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
