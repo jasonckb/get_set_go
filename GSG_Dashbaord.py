@@ -167,9 +167,9 @@ def set_state(signal):
         advancing = signal.iloc[-1] > signal.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 3, "Set Bullish++"
+            return 2, "Set Bullish++"
         elif cross_down.iloc[-1]:
-            return -3, "Set Bearish++"
+            return -2, "Set Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Set Bullish+"
@@ -199,9 +199,9 @@ def go_state(macd):
         advancing = macd.iloc[-1] > macd.iloc[-2]
         
         if cross_up.iloc[-1]:
-            return 3, "Go Bullish++"
+            return 2, "Go Bullish++"
         elif cross_down.iloc[-1]:
-            return -3, "Go Bearish++"
+            return -2, "Go Bearish++"
         elif above_zero:  # Bullish
             if advancing:
                 return 2, "Go Bullish+"
