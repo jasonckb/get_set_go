@@ -264,9 +264,10 @@ def analyze_symbol(data):
         macd, signal = calculate_macd(data)
         
         get_val, get_str = get_state(plus_di, minus_di, adx)
-        set_val, set_str = set_state(signal)  # Using signal line for Set state
-        go_val, go_str = go_state(macd)      # Using MACD line for Go state
+        set_val, set_str = set_state(macd)    # Corrected argument
+        go_val, go_str = go_state(signal)     # Corrected argument
         
+        # Continue with the rest of the analysis
         total_score = get_val + set_val + go_val
         trend, color = get_trend(total_score)
         
@@ -279,6 +280,7 @@ def analyze_symbol(data):
     except Exception as e:
         st.error(f"Error in analysis: {str(e)}")
         return None
+
 
 def main():
     st.title("Stock DMI MACD States Dashboard")
