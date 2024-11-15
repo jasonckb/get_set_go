@@ -50,33 +50,36 @@ TIMEFRAMES = {
     "Hourly": "1h"
 }
 
-# Technical Analysis Functions
 def calculate_dmi(df, length=14, smoothing=14):
     high = df['High']
     low = df['Low']
     close = df['Close']
     
-    # Calculate True Range
-    tr1 = abs(high - low)
+    # True Range
+    tr1 = high - low
     tr2 = abs(high - close.shift(1))
     tr3 = abs(low - close.shift(1))
     tr = pd.DataFrame({'tr1': tr1, 'tr2': tr2, 'tr3': tr3}).max(axis=1)
     
-    # Calculate directional movement
+    # Directional Movement
     up_move = high - high.shift(1)
     down_move = low.shift(1) - low
     
     plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0)
     minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
     
-    # Calculate smoothed values
-    tr_smoothed = pd.Series(tr).rolling(window=length).mean()
-    plus_di = 100 * pd.Series(plus_dm).rolling(window=length).mean() / tr_smoothed
-    minus_di = 100 * pd.Series(minus_dm).rolling(window=length).mean() / tr_smoothed
+    # Smoothing using RMA (Similar to PineScript's rma function)
+    def rma(series, length):
+        alpha = 1.0 / length
+        return series.ewm(alpha=alpha, adjust=False).mean()
     
-    # Calculate ADX
+    tr_rma = rma(tr, length)
+    plus_di = 100 * rma(pd.Series(plus_dm), length) / tr_rma
+    minus_di = 100 * rma(pd.Series(minus_dm), length) / tr_rma
+    
+    # ADX
     dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
-    adx = dx.rolling(window=smoothing).mean()
+    adx = rma(dx, smoothing)
     
     return plus_di, minus_di, adx
 
@@ -93,51 +96,69 @@ def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_ad
     return macd, signal
 
 def get_state(plus_di, minus_di, adx):
-    value = 0
-    state = ""
+    dmi_cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
+    dmi_cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
     
-    if plus_di.iloc[-1] > minus_di.iloc[-1]:
-        value = 4 if adx.iloc[-1] > adx.iloc[-2] else 3
-        state = "Bullish+" if adx.iloc[-1] > adx.iloc[-2] else "Bullish-"
+    if dmi_cross_up.iloc[-1]:
+        return 4, "Bullish++"
+    elif dmi_cross_down.iloc[-1]:
+        return -4, "Bearish++"
+    elif plus_di.iloc[-1] > minus_di.iloc[-1]:
+        if adx.iloc[-1] > adx.iloc[-2]:
+            return 4, "Bullish+"
+        else:
+            return 3, "Bullish-"
     else:
-        value = -4 if adx.iloc[-1] > adx.iloc[-2] else -3
-        state = "Bearish+" if adx.iloc[-1] > adx.iloc[-2] else "Bearish-"
-    
-    return value, state
+        if adx.iloc[-1] > adx.iloc[-2]:
+            return -4, "Bearish+"
+        else:
+            return -3, "Bearish-"
 
 def set_state(macd):
-    value = 0
-    state = ""
+    cross_up = (macd.shift(1) <= 0) & (macd > 0)
+    cross_down = (macd.shift(1) >= 0) & (macd < 0)
     
-    if macd.iloc[-1] > 0:
-        value = 2 if macd.iloc[-1] > macd.iloc[-2] else 1
-        state = "Bullish+" if macd.iloc[-1] > macd.iloc[-2] else "Bullish-"
+    if cross_up.iloc[-1]:
+        return 3, "Set Bullish++"
+    elif cross_down.iloc[-1]:
+        return -3, "Set Bearish++"
+    elif macd.iloc[-1] > 0:
+        if macd.iloc[-1] > macd.iloc[-2]:
+            return 2, "Bullish+"
+        else:
+            return 1, "Bullish-"
     else:
-        value = -2 if macd.iloc[-1] < macd.iloc[-2] else -1
-        state = "Bearish+" if macd.iloc[-1] < macd.iloc[-2] else "Bearish-"
-    
-    return value, state
+        if macd.iloc[-1] < macd.iloc[-2]:
+            return -2, "Bearish+"
+        else:
+            return -1, "Bearish-"
 
 def go_state(signal):
-    value = 0
-    state = ""
+    cross_up = (signal.shift(1) <= 0) & (signal > 0)
+    cross_down = (signal.shift(1) >= 0) & (signal < 0)
     
-    if signal.iloc[-1] > 0:
-        value = 2 if signal.iloc[-1] > signal.iloc[-2] else 1
-        state = "Bullish+" if signal.iloc[-1] > signal.iloc[-2] else "Bullish-"
+    if cross_up.iloc[-1]:
+        return 3, "Go Bullish++"
+    elif cross_down.iloc[-1]:
+        return -3, "Go Bearish++"
+    elif signal.iloc[-1] > 0:
+        if signal.iloc[-1] > signal.iloc[-2]:
+            return 2, "Bullish+"
+        else:
+            return 1, "Bullish-"
     else:
-        value = -2 if signal.iloc[-1] < signal.iloc[-2] else -1
-        state = "Bearish+" if signal.iloc[-1] < signal.iloc[-2] else "Bearish-"
-    
-    return value, state
+        if signal.iloc[-1] < signal.iloc[-2]:
+            return -2, "Bearish+"
+        else:
+            return -1, "Bearish-"
 
 def get_trend(total_score):
     if total_score >= 5:
-        return "Buy", "green"
+        return f"Buy ({total_score})", "green"
     elif total_score <= -5:
-        return "Sell", "red"
+        return f"Sell ({total_score})", "red"
     else:
-        return "Neutral", "white"
+        return f"Neutral ({total_score})", "white"
 
 def fetch_data(symbol, timeframe):
     end_date = datetime.now()
@@ -150,6 +171,8 @@ def fetch_data(symbol, timeframe):
     
     try:
         data = yf.download(symbol, start=start_date, end=end_date, interval=timeframe)
+        if len(data) < 30:  # Ensure enough data for calculations
+            return None
         return data
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
@@ -173,31 +196,29 @@ def analyze_symbol(data):
         "Get": (get_str, "green" if get_val > 0 else "red"),
         "Set": (set_str, "green" if set_val > 0 else "red"),
         "Go": (go_str, "green" if go_val > 0 else "red"),
-        "Trend": (f"{trend} ({total_score})", color)
+        "Trend": (trend, color)
     }
 
 def main():
     st.title("Stock DMI MACD States Dashboard")
     
-    # Sidebar for portfolio selection
+    # Sidebar
     st.sidebar.title("Settings")
     selected_portfolio = st.sidebar.selectbox(
         "Select Portfolio",
         list(default_stocks.keys())
     )
     
-    # Get selected symbols
     symbols = default_stocks[selected_portfolio]
     
-    # Create empty DataFrame for results
+    # Results DataFrame
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
     
-    # Progress bar
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # Analysis for each symbol and timeframe
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
     
@@ -217,7 +238,7 @@ def main():
     progress_bar.empty()
     status_text.empty()
     
-    # Display results in a styled table
+    # Table styling
     st.markdown("""
     <style>
     .stDataFrame td, .stDataFrame th {
@@ -228,7 +249,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Convert results to HTML with colored cells
+    # Create HTML table
     html_table = "<table style='width:100%; border-collapse: collapse;'>"
     
     # Header
@@ -261,7 +282,7 @@ def main():
     
     st.markdown(html_table, unsafe_allow_html=True)
     
-    # Add auto-refresh button
+    # Refresh button
     if st.button("Refresh Data"):
         st.experimental_rerun()
 
