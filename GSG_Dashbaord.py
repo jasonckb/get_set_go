@@ -234,11 +234,10 @@ def fetch_data(symbol, timeframe):
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
             # Download daily data directly
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(
+            data = yf.download(
+                symbol,
                 start=start_date,
                 end=end_date,
-                interval="1d",
                 auto_adjust=True
             )
         else:  # Weekly
