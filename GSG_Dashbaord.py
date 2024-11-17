@@ -55,23 +55,36 @@ TIMEFRAMES = {
 }
 
 def rma(series, length):
-    """Replicate PineScript's ta.rma function"""
+    """Replicate TradingView's ta.rma function exactly"""
     alpha = 1.0 / length
-    result = pd.Series(index=series.index)
-    result.iloc[0] = series.iloc[0]  # Initialize first value
-    for i in range(1, len(series)):
-        result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    result = pd.Series(0.0, index=series.index)
+    
+    # Find first valid value
+    first_valid_idx = series.first_valid_index()
+    if first_valid_idx is None:
+        return result
+    
+    # Set first value
+    result.loc[first_valid_idx] = series.loc[first_valid_idx]
+    
+    # Calculate RMA
+    for i in range(series.index.get_loc(first_valid_idx) + 1, len(series)):
+        if pd.isna(series.iloc[i]):
+            result.iloc[i] = result.iloc[i-1]
+        else:
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    
     return result
 
 def calculate_dmi(df, length=14, smoothing=14):
     try:
         df = df.copy()
         
-        # Calculate directional movement (matching PineScript)
+        # Calculate directional movement exactly like TradingView
         up = df['High'] - df['High'].shift(1)  # ta.change(high)
         down = -(df['Low'] - df['Low'].shift(1))  # -ta.change(low)
         
-        # Calculate DM (matching PineScript logic)
+        # Calculate DM exactly like TradingView
         plus_dm = pd.Series(0.0, index=df.index)
         minus_dm = pd.Series(0.0, index=df.index)
         
@@ -85,12 +98,12 @@ def calculate_dmi(df, length=14, smoothing=14):
             'lc': abs(df['Low'] - df['Close'].shift(1))
         }).max(axis=1)
         
-        # Use RMA for smoothing (matching ta.rma)
+        # Use RMA for smoothing
         tr_rma = rma(tr, length)
         plus_di = 100 * rma(plus_dm, length) / tr_rma
         minus_di = 100 * rma(minus_dm, length) / tr_rma
         
-        # Calculate ADX (matching PineScript)
+        # Calculate ADX
         dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1)
         adx = rma(dx, smoothing)
         
@@ -103,37 +116,33 @@ def calculate_dmi(df, length=14, smoothing=14):
 def pine_ema(series, length, alpha_adj=19):
     """Replicate TradingView's pine_ema function exactly"""
     alpha = 2.0 / (length + alpha_adj)
-    result = pd.Series(index=series.index)
+    result = pd.Series(0.0, index=series.index)
     
-    # Initialize first value (equivalent to na(sum[1]) ? src : ...)
-    for i in range(len(series)):
-        if not pd.isna(series.iloc[i]):
-            result.iloc[i] = series.iloc[i]
-            break
+    # Find first valid value
+    first_valid_idx = series.first_valid_index()
+    if first_valid_idx is None:
+        return result
     
-    # Calculate rest of values (equivalent to alpha * src + (1 - alpha) * nz(sum[1]))
-    for i in range(1, len(series)):
+    # Set first value
+    result.loc[first_valid_idx] = series.loc[first_valid_idx]
+    
+    # Calculate EMA using TradingView's method
+    for i in range(series.index.get_loc(first_valid_idx) + 1, len(series)):
         if pd.isna(series.iloc[i]):
-            result.iloc[i] = result.iloc[i-1] if not pd.isna(result.iloc[i-1]) else None
+            result.iloc[i] = result.iloc[i-1]  # Use previous value for NaN
         else:
-            prev = result.iloc[i-1] if not pd.isna(result.iloc[i-1]) else series.iloc[i]
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * prev
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
     
     return result
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
-        # Use Close price
         close = df['Close'].copy()
         
-        # Calculate MACD using pine_ema exactly like TradingView
+        # Calculate MACD using pine_ema
         fast_ma = pine_ema(close, fast_length, alpha_adj)
         slow_ma = pine_ema(close, slow_length, alpha_adj)
-        
-        # Calculate MACD line
         macd = fast_ma - slow_ma
-        
-        # Calculate signal line
         signal = pine_ema(macd, signal_length, alpha_adj)
         
         return macd, signal
@@ -142,13 +151,12 @@ def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_ad
         st.error(f"Error in MACD calculation: {str(e)}")
         return None, None
 
-
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
         return 0, "N/A"
     
     try:
-        # Check crossovers (matching PineScript ta.crossover/ta.crossunder)
+        # Check crossovers
         dmi_cross_up = (plus_di.shift(1) <= minus_di.shift(1)) & (plus_di > minus_di)
         dmi_cross_down = (plus_di.shift(1) >= minus_di.shift(1)) & (plus_di < minus_di)
         
@@ -176,7 +184,6 @@ def set_state(macd):
         return 0, "N/A"
     
     try:
-        # Check crossovers (matching PineScript)
         cross_up = (macd.shift(1) <= 0) & (macd > 0)
         cross_down = (macd.shift(1) >= 0) & (macd < 0)
         
@@ -204,7 +211,6 @@ def go_state(signal):
         return 0, "N/A"
     
     try:
-        # Check crossovers (matching PineScript)
         cross_up = (signal.shift(1) <= 0) & (signal > 0)
         cross_down = (signal.shift(1) >= 0) & (signal < 0)
         
@@ -258,17 +264,14 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         else:  # Weekly
-            # For weekly data, get more historical daily data for better indicator calculation
-            start_date = end_date - timedelta(days=365 + 100)  # Extra 100 days for warmup
+            start_date = end_date - timedelta(days=365)
+            # Get daily data first
             daily_data = ticker.history(
                 start=start_date,
                 end=end_date,
                 interval="1d",
                 auto_adjust=True
             )
-            
-            # Fill missing data with previous day's data
-            daily_data = daily_data.fillna(method='ffill')
             
             # Check if it's a HK stock
             is_hk_stock = symbol.endswith('.HK')
@@ -291,9 +294,6 @@ def fetch_data(symbol, timeframe):
             else:
                 # For other stocks, use standard resampling
                 data = daily_data.resample('W-FRI').agg(functions)
-            
-            # Keep only the last year of data
-            data = data.tail(52)
         
         if data.empty:
             return None
@@ -301,11 +301,8 @@ def fetch_data(symbol, timeframe):
         if len(data) < 30:
             return None
         
-        # Fill any remaining missing data
-        data = data.fillna(method='ffill')
-        
-        # Fill any leading NaN values with the first valid value
-        data = data.fillna(method='bfill')
+        # Fill any missing data
+        data = data.fillna(method='ffill').fillna(method='bfill')
         
         # Ensure index has no timezone info
         data.index = data.index.tz_localize(None)
@@ -325,6 +322,7 @@ def analyze_symbol(data):
         }
     
     try:
+        # Calculate indicators
         plus_di, minus_di, adx = calculate_dmi(data)
         macd, signal = calculate_macd(data)
         
@@ -594,4 +592,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
