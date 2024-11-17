@@ -346,7 +346,6 @@ def analyze_symbol(data):
         return None
 
 def extract_trend_value(trend_str):
-    """Extract numeric value from trend string."""
     if not isinstance(trend_str, tuple):
         return 0
     trend_text = trend_str[0]
@@ -357,7 +356,6 @@ def extract_trend_value(trend_str):
     return int(match.group(1)) if match else 0
 
 def calculate_total_trend(weekly_trend, daily_trend, hourly_trend):
-    """Calculate weighted average trend."""
     weekly_val = extract_trend_value(weekly_trend)
     daily_val = extract_trend_value(daily_trend)
     hourly_val = extract_trend_value(hourly_trend)
@@ -386,15 +384,16 @@ def main():
     
     symbols = default_stocks[selected_portfolio]
     debug_data = {}
+    
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
+    total_trends = {}  # Store Total Trend separately
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
     last_update_times = {}
-    timeframe_results = {}
     
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
@@ -428,18 +427,18 @@ def main():
                     timeframe_results[tf_name] = analysis
                     for indicator in ['Get', 'Set', 'Go', 'Trend']:
                         results.loc[symbol, (tf_name, indicator)] = analysis[indicator]
-
+            
             current_iteration += 1
             progress_bar.progress(current_iteration / total_iterations)
-            
-        # Calculate Total Trend after all timeframes are processed
+        
+        # Calculate Total Trend after processing all timeframes for this symbol
         if timeframe_results:
             total_trend = calculate_total_trend(
                 timeframe_results['Weekly']['Trend'],
                 timeframe_results['Daily']['Trend'],
                 timeframe_results['Hourly']['Trend']
             )
-            results.loc[symbol, 'Total Trend'] = total_trend
+            total_trends[symbol] = total_trend
     
     progress_bar.empty()
     status_text.empty()
@@ -498,13 +497,12 @@ def main():
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
         
-        total_trend = results.loc[symbol, 'Total Trend']
-        if isinstance(total_trend, tuple):
-            text, color = total_trend
-            html_table += f"<td class='value' style='color:{color};'>{text}</td>"
-        else:
-            html_table += f"<td class='value'>N/A</td>"
+        # Add Total Trend column
+        total_trend = total_trends.get(symbol, ('N/A', 'white'))
+        text, color = total_trend
+        html_table += f"<td class='value' style='color:{color};'>{text}</td>"
         
+        # Add other columns
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
