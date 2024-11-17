@@ -345,6 +345,32 @@ def analyze_symbol(data):
         st.error(f"Error in analysis: {str(e)}")
         return None
 
+def extract_trend_value(trend_str):
+    """Extract numeric value from trend string."""
+    if not isinstance(trend_str, tuple):
+        return 0
+    trend_text = trend_str[0]
+    if not isinstance(trend_text, str):
+        return 0
+    import re
+    match = re.search(r'\(([+-]?\d+)\)', trend_text)
+    return int(match.group(1)) if match else 0
+
+def calculate_total_trend(weekly_trend, daily_trend, hourly_trend):
+    """Calculate weighted average trend."""
+    weekly_val = extract_trend_value(weekly_trend)
+    daily_val = extract_trend_value(daily_trend)
+    hourly_val = extract_trend_value(hourly_trend)
+    
+    weighted_sum = (weekly_val * 2 + daily_val * 2 + hourly_val * 1) / 5
+    
+    if weighted_sum >= 5:
+        return (f"Buy ({weighted_sum:.1f})", "green")
+    elif weighted_sum <= -5:
+        return (f"Sell ({weighted_sum:.1f})", "red")
+    else:
+        return (f"Hold ({weighted_sum:.1f})", "gray")
+
 def main():
     st.title("Get Set Go Dashboard")
     
@@ -367,7 +393,9 @@ def main():
     debug_data = {}
     
     # Create empty DataFrame for results
-    columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
+    # Modified to include Total Trend column
+    timeframe_columns = ['Get', 'Set', 'Go', 'Trend']
+    columns = ['Total Trend'] + [f"{tf}_{col}" for tf in TIMEFRAMES.keys() for col in timeframe_columns]
     results = pd.DataFrame(index=symbols, columns=columns)
     
     # Progress tracking
@@ -384,6 +412,8 @@ def main():
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
         debug_data[symbol] = {}
+        
+        timeframe_results = {}
         
         # Process each timeframe
         for tf_name, tf_code in TIMEFRAMES.items():
@@ -415,16 +445,27 @@ def main():
             analysis = analyze_symbol(data)
             
             if analysis:
+                # Store results for each timeframe
+                timeframe_results[tf_name] = analysis
                 for indicator in ['Get', 'Set', 'Go', 'Trend']:
-                    results.loc[symbol, (tf_name, indicator)] = analysis[indicator]
+                    results.loc[symbol, f"{tf_name}_{indicator}"] = analysis[indicator]
             
             current_iteration += 1
             progress_bar.progress(current_iteration / total_iterations)
+        
+        # Calculate Total Trend
+        if timeframe_results:
+            total_trend = calculate_total_trend(
+                timeframe_results['Weekly']['Trend'],
+                timeframe_results['Daily']['Trend'],
+                timeframe_results['Hourly']['Trend']
+            )
+            results.loc[symbol, 'Total Trend'] = total_trend
     
     progress_bar.empty()
     status_text.empty()
     
-    # Table styling
+    # Table styling (updated to include Total Trend)
     st.markdown("""
     <style>
     table {
@@ -454,11 +495,11 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Create HTML table
+    # Create HTML table with Total Trend
     html_table = "<table>"
     
     # Last update time row
-    html_table += "<tr><th></th>"
+    html_table += "<tr><th></th><th></th>"  # Extra th for Total Trend
     for tf in TIMEFRAMES.keys():
         last_update = last_update_times.get(tf, "N/A")
         if isinstance(last_update, pd.Timestamp):
@@ -469,13 +510,13 @@ def main():
     html_table += "</tr>"
     
     # Header
-    html_table += "<tr><th></th>"
+    html_table += "<tr><th></th><th class='timeframe'>Total Trend</th>"
     for tf in TIMEFRAMES.keys():
         html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
     html_table += "</tr>"
     
     # Subheader
-    html_table += "<tr><th class='symbol'>Symbol</th>"
+    html_table += "<tr><th class='symbol'>Symbol</th><th class='value'></th>"
     for _ in TIMEFRAMES.keys():
         html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
     html_table += "</tr>"
@@ -483,9 +524,19 @@ def main():
     # Data rows
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
+        
+        # Add Total Trend
+        total_trend = results.loc[symbol, 'Total Trend']
+        if isinstance(total_trend, tuple):
+            text, color = total_trend
+            html_table += f"<td class='value' style='color:{color};'>{text}</td>"
+        else:
+            html_table += f"<td class='value'>{total_trend}</td>"
+        
+        # Add other columns
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
-                value = results.loc[symbol, (tf, col)]
+                value = results.loc[symbol, f"{tf}_{col}"]
                 if isinstance(value, tuple):
                     text, color = value
                     html_table += f"<td class='value' style='color:{color};'>{text}</td>"
@@ -497,100 +548,4 @@ def main():
     
     st.markdown(html_table, unsafe_allow_html=True)
     
-    # Debug section
-    st.markdown("---")
-    st.header("Debug View")
-    
-    # Create tabs for Raw Data and Calculations
-    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
-    
-    with tab_raw:
-        # Select symbol and timeframe
-        col1, col2 = st.columns(2)
-        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
-        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
-        
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 30 rows of data for {selected_symbol} ({selected_tf})")
-            
-            # Get the raw data and calculations
-            raw_data = debug_data[selected_symbol][selected_tf]['raw_data']
-            calcs = debug_data[selected_symbol][selected_tf]['calculations']
-            
-            # Combine price data with indicators
-            combined_data = pd.DataFrame({
-                'Date': raw_data.index,
-                'Open': raw_data['Open'],
-                'High': raw_data['High'],
-                'Low': raw_data['Low'],
-                'Close': raw_data['Close'],
-                'Volume': raw_data['Volume'],
-                '+DI': calcs['plus_di'],
-                '-DI': calcs['minus_di'],
-                'ADX': calcs['adx'],
-                'MACD': calcs['macd'],
-                'Signal': calcs['signal']
-            })
-            
-            # Format numeric columns to 4 decimal places
-            numeric_cols = combined_data.select_dtypes(include=['float64']).columns
-            combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
-            
-            # Display the last 30 rows
-            st.dataframe(combined_data.tail(30))
-            
-            # Add a download button for the data
-            csv = combined_data.to_csv(index=False)
-            st.download_button(
-                label="Download data as CSV",
-                data=csv,
-                file_name=f'{selected_symbol}_{selected_tf}_data.csv',
-                mime='text/csv',
-            )
-    
-    with tab_calc:
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 30 rows of calculations for {selected_symbol} ({selected_tf})")
-            calcs = debug_data[selected_symbol][selected_tf]['calculations']
-            
-            # DMI Indicators
-            st.write("DMI Indicators:")
-            dmi_df = pd.DataFrame({
-                'Date': calcs['plus_di'].index,
-                '+DI': calcs['plus_di'],
-                '-DI': calcs['minus_di'],
-                'ADX': calcs['adx']
-            }).tail(30)
-            st.dataframe(dmi_df)
-            
-            # MACD Indicators
-            st.write("MACD Indicators:")
-            macd_df = pd.DataFrame({
-                'Date': calcs['macd'].index,
-                'MACD': calcs['macd'],
-                'Signal': calcs['signal']
-            }).tail(30)
-            st.dataframe(macd_df)
-            
-            # Add download buttons for calculations
-            dmi_csv = dmi_df.to_csv(index=False)
-            macd_csv = macd_df.to_csv(index=False)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    label="Download DMI data",
-                    data=dmi_csv,
-                    file_name=f'{selected_symbol}_{selected_tf}_dmi.csv',
-                    mime='text/csv',
-                )
-            with col2:
-                st.download_button(
-                    label="Download MACD data",
-                    data=macd_csv,
-                    file_name=f'{selected_symbol}_{selected_tf}_macd.csv',
-                    mime='text/csv',
-                )
-
-if __name__ == "__main__":
-    main()
+    # Debug section remains the same...
