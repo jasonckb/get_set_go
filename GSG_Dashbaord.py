@@ -221,7 +221,6 @@ def get_trend(total_score):
 def fetch_data(symbol, timeframe):
     try:
         end_date = datetime.now()
-        
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
             interval = "1h"
@@ -229,21 +228,16 @@ def fetch_data(symbol, timeframe):
             start_date = end_date - timedelta(days=100)
             interval = "1d"
         else:  # Weekly
-            # Adjust end_date to next Friday if not already a Friday
-            while end_date.weekday() != 4:  # 4 is Friday
-                end_date += timedelta(days=1)
-            
-            # Start date should be 52 weeks before end_date to ensure we have enough historical data
-            start_date = end_date - timedelta(weeks=52)
+            start_date = end_date - timedelta(days=365)
             interval = "1wk"
         
         # Create a Ticker object
         ticker = yf.Ticker(symbol)
         
-        # Download data with explicit timezone handling
+        # Download data
         data = ticker.history(
-            start=start_date.strftime('%Y-%m-%d'),
-            end=end_date.strftime('%Y-%m-%d'),
+            start=start_date,
+            end=end_date,
             interval=interval,
             auto_adjust=True
         )
@@ -253,22 +247,7 @@ def fetch_data(symbol, timeframe):
             
         if len(data) < 30:
             return None
-        
-        # For weekly data, ensure the index ends on Fridays
-        if interval == "1wk":
-            # Convert index to datetime if it's not already
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data.index = pd.to_datetime(data.index)
             
-            # Filter to keep only Friday data
-            data = data[data.index.weekday == 4]
-            # Sort by date descending to get most recent weeks first
-            data = data.sort_index(ascending=False)
-            # Keep only the required number of weeks
-            data = data.head(52)  # Keep last 52 weeks
-            # Sort back to ascending order for calculations
-            data = data.sort_index(ascending=True)
-        
         return data
         
     except Exception as e:
@@ -348,16 +327,10 @@ def main():
         # Process each timeframe
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
-            if data is not None and not data.empty:
-                try:
-                    # Store the last update time for each timeframe
-                    if tf_name not in last_update_times and len(data.index) > 0:
-                        last_update_times[tf_name] = data.index[-1]
-                    elif tf_name not in last_update_times:
-                        last_update_times[tf_name] = "No data"
-                except Exception as e:
-                    st.error(f"Error accessing last update time for {symbol} {tf_name}: {str(e)}")
-                    last_update_times[tf_name] = "Error"
+            if data is not None:
+                # Store the last update time for each timeframe
+                if tf_name not in last_update_times:
+                    last_update_times[tf_name] = data.index[-1]
                 
                 # Store raw data
                 debug_data[symbol][tf_name] = {
