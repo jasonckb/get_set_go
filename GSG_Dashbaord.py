@@ -283,7 +283,7 @@ def analyze_symbol(data):
         st.error(f"Error in analysis: {str(e)}")
         return None
 def main():
-    st.title("Stock DMI MACD States Dashboard")
+    st.title("Get Set Go Dashboard")
     
     # Clear cache if refresh button is clicked
     if st.button("Refresh Data"):
