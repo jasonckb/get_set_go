@@ -234,31 +234,31 @@ def fetch_data(symbol, timeframe):
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
             # Download daily data directly
-            data = yf.download(
-                symbol,
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
                 start=start_date,
                 end=end_date,
+                interval="1d",
                 auto_adjust=True
             )
         else:  # Weekly
             # For weekly data, download daily data and resample
             start_date = end_date - timedelta(days=365)
             # Download daily data with adjusted close
-            data = yf.download(
-                symbol,
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
                 start=start_date,
                 end=end_date,
+                interval="1d",
                 auto_adjust=True
             )
-            # Remove Close column as we're using Adj Close
-            data = data.drop("Close", axis=1) if "Close" in data.columns else data
             
             # Define aggregation functions for each column
             functions = {
                 "Open": "first",
                 "High": "max",
                 "Low": "min",
-                "Adj Close": "last",
+                "Close": "last",
                 "Volume": "sum"
             }
             
@@ -273,6 +273,10 @@ def fetch_data(symbol, timeframe):
             
         return data
         
+    except Exception as e:
+        st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return None
+
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
