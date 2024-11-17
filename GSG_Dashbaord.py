@@ -223,24 +223,47 @@ def fetch_data(symbol, timeframe):
         end_date = datetime.now()
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
-            interval = "1h"
+            # Download hourly data directly
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
+                start=start_date,
+                end=end_date,
+                interval="1h",
+                auto_adjust=True
+            )
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
-            interval = "1d"
+            # Download daily data directly
+            data = yf.download(
+                symbol,
+                start=start_date,
+                end=end_date,
+                auto_adjust=True
+            )
         else:  # Weekly
+            # For weekly data, download daily data and resample
             start_date = end_date - timedelta(days=365)
-            interval = "1wk"
-        
-        # Create a Ticker object
-        ticker = yf.Ticker(symbol)
-        
-        # Download data
-        data = ticker.history(
-            start=start_date,
-            end=end_date,
-            interval=interval,
-            auto_adjust=True
-        )
+            # Download daily data with adjusted close
+            data = yf.download(
+                symbol,
+                start=start_date,
+                end=end_date,
+                auto_adjust=True
+            )
+            # Remove Close column as we're using Adj Close
+            data = data.drop("Close", axis=1) if "Close" in data.columns else data
+            
+            # Define aggregation functions for each column
+            functions = {
+                "Open": "first",
+                "High": "max",
+                "Low": "min",
+                "Adj Close": "last",
+                "Volume": "sum"
+            }
+            
+            # Resample to weekly data ending on Friday with proper aggregation
+            data = data.resample('W-FRI').agg(functions)
         
         if data.empty:
             return None
