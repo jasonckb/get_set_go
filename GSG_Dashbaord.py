@@ -5,6 +5,10 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import time
 
+# Initialize session state if not already initialized
+if 'session_info' not in st.session_state:
+    st.session_state.session_info = {}
+
 # Set page config
 st.set_page_config(layout="wide", page_title="Stock DMI MACD States Dashboard")
 
@@ -36,7 +40,6 @@ default_stocks = {
         "PFE", "PG", "PGR", "PLTR", "PYPL", "QCOM", "REGN", "SBUX", "SMH", "SNOW",
         "SPGI", "TEAM", "TJX", "TRAV", "TSM", "TSLA", "TTD", "TXN", "UNH", "UPS",
         "V", "VST", "VZ", "WMT", "XOM", "ZS"
-        
     ],
     "World Index": [
         "^SPX", "^NDX", "^RUT", "^SOX", "^TNX", "^DJI", "^HSI", "3032.HK", 
@@ -214,7 +217,6 @@ def get_trend(total_score):
     else:
         return f"Hold ({total_score})", "gray"
 
-
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
     try:
@@ -266,10 +268,9 @@ def analyze_symbol(data):
         macd, signal = calculate_macd(data)
         
         get_val, get_str = get_state(plus_di, minus_di, adx)
-        set_val, set_str = set_state(macd)    # Corrected argument
-        go_val, go_str = go_state(signal)     # Corrected argument
+        set_val, set_str = set_state(macd)
+        go_val, go_str = go_state(signal)
         
-        # Continue with the rest of the analysis
         total_score = get_val + set_val + go_val
         trend, color = get_trend(total_score)
         
@@ -282,6 +283,7 @@ def analyze_symbol(data):
     except Exception as e:
         st.error(f"Error in analysis: {str(e)}")
         return None
+
 def main():
     st.title("Get Set Go Dashboard")
     
@@ -485,6 +487,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
