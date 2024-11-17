@@ -250,7 +250,7 @@ def fetch_data(symbol, timeframe):
         ticker = yf.Ticker(symbol)
         
         if timeframe == "1h":
-            start_date = end_date - timedelta(days=10)
+            start_date = end_date - timedelta(days=20)
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -266,7 +266,7 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         else:  # Weekly
-            start_date = end_date - timedelta(days=800)
+            start_date = end_date - timedelta(days=1000)
             # Get daily data first
             daily_data = ticker.history(
                 start=start_date,
@@ -363,7 +363,7 @@ def main():
     # Get selected symbols
     symbols = default_stocks[selected_portfolio]
     
-    # Store data and calculations
+    # Store data and calculations for debug view
     debug_data = {}
     
     # Create empty DataFrame for results
@@ -392,6 +392,33 @@ def main():
                 # Store the last update time for each timeframe
                 if tf_name not in last_update_times:
                     last_update_times[tf_name] = data.index[-1]
+                
+                # Verify data columns and values
+                st.write(f"Debug - {symbol} {tf_name} Data Columns:", data.columns.tolist())
+                st.write(f"Debug - {symbol} {tf_name} Last Row:", data.tail(1))
+                
+                # Store raw data before any modifications
+                debug_data[symbol][tf_name] = {
+                    'raw_data': data.copy(),  # Store a copy to prevent modifications
+                    'calculations': {}
+                }
+                
+                # Calculate indicators using the raw data
+                plus_di, minus_di, adx = calculate_dmi(data.copy())  # Pass a copy to prevent modifications
+                macd, signal = calculate_macd(data.copy())  # Pass a copy to prevent modifications
+                
+                # Store calculations
+                debug_data[symbol][tf_name]['calculations'] = {
+                    'plus_di': plus_di,
+                    'minus_di': minus_di,
+                    'adx': adx,
+                    'macd': macd,
+                    'signal': signal
+                }
+                
+                # Verify calculations
+                st.write(f"Debug - {symbol} {tf_name} MACD Last Value:", macd.iloc[-1] if macd is not None else None)
+                st.write(f"Debug - {symbol} {tf_name} Signal Last Value:", signal.iloc[-1] if signal is not None else None)
             
             analysis = analyze_symbol(data)
             
@@ -477,6 +504,101 @@ def main():
     html_table += "</table>"
     
     st.markdown(html_table, unsafe_allow_html=True)
+    
+    # Debug section
+    st.markdown("---")
+    st.header("Debug View")
+    
+    # Create tabs for Raw Data and Calculations
+    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
+    
+    with tab_raw:
+        # Select symbol and timeframe
+        col1, col2 = st.columns(2)
+        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
+        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
+        
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Last 30 rows of data for {selected_symbol} ({selected_tf})")
+            
+            # Get the raw data and calculations
+            raw_data = debug_data[selected_symbol][selected_tf]['raw_data']
+            calcs = debug_data[selected_symbol][selected_tf]['calculations']
+            
+            # Combine price data with indicators
+            combined_data = pd.DataFrame({
+                'Date': raw_data.index,
+                'Open': raw_data['Open'],
+                'High': raw_data['High'],
+                'Low': raw_data['Low'],
+                'Close': raw_data['Close'],
+                'Volume': raw_data['Volume'],
+                '+DI': calcs['plus_di'],
+                '-DI': calcs['minus_di'],
+                'ADX': calcs['adx'],
+                'MACD': calcs['macd'],
+                'Signal': calcs['signal']
+            })
+            
+            # Format numeric columns to 4 decimal places
+            numeric_cols = combined_data.select_dtypes(include=['float64']).columns
+            combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
+            
+            # Display the last 30 rows
+            st.dataframe(combined_data.tail(30))
+            
+            # Add a download button for the data
+            csv = combined_data.to_csv(index=False)
+            st.download_button(
+                label="Download data as CSV",
+                data=csv,
+                file_name=f'{selected_symbol}_{selected_tf}_data.csv',
+                mime='text/csv',
+            )
+    
+    with tab_calc:
+        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
+            st.subheader(f"Last 30 rows of calculations for {selected_symbol} ({selected_tf})")
+            calcs = debug_data[selected_symbol][selected_tf]['calculations']
+            
+            # DMI Indicators
+            st.write("DMI Indicators:")
+            dmi_df = pd.DataFrame({
+                'Date': calcs['plus_di'].index,
+                '+DI': calcs['plus_di'],
+                '-DI': calcs['minus_di'],
+                'ADX': calcs['adx']
+            }).tail(30)
+            st.dataframe(dmi_df)
+            
+            # MACD Indicators
+            st.write("MACD Indicators:")
+            macd_df = pd.DataFrame({
+                'Date': calcs['macd'].index,
+                'MACD': calcs['macd'],
+                'Signal': calcs['signal']
+            }).tail(30)
+            st.dataframe(macd_df)
+            
+            # Add download buttons for calculations
+            dmi_csv = dmi_df.to_csv(index=False)
+            macd_csv = macd_df.to_csv(index=False)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="Download DMI data",
+                    data=dmi_csv,
+                    file_name=f'{selected_symbol}_{selected_tf}_dmi.csv',
+                    mime='text/csv',
+                )
+            with col2:
+                st.download_button(
+                    label="Download MACD data",
+                    data=macd_csv,
+                    file_name=f'{selected_symbol}_{selected_tf}_macd.csv',
+                    mime='text/csv',
+                )
 
 if __name__ == "__main__":
     main()
