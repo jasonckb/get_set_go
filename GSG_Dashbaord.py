@@ -223,28 +223,42 @@ def fetch_data(symbol, timeframe):
         end_date = datetime.now()
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
-            interval = "1h"
+            # Download hourly data directly
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
+                start=start_date,
+                end=end_date,
+                interval="1h",
+                auto_adjust=True
+            )
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
-            interval = "1d"
+            # Download daily data directly
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(
+                start=start_date,
+                end=end_date,
+                interval="1d",
+                auto_adjust=True
+            )
         else:  # Weekly
-            # For weekly data, start from a year ago to ensure we have enough historical data
+            # For weekly data, download daily data and resample
             start_date = end_date - timedelta(days=365)
-            interval = "1wk"
-            # Ensure end_date includes the current week's Friday
-            days_until_friday = (4 - end_date.weekday()) % 7  # 4 represents Friday
-            end_date = end_date + timedelta(days=days_until_friday)
-        
-        # Create a Ticker object
-        ticker = yf.Ticker(symbol)
-        
-        # Download data with explicit date formatting
-        data = ticker.history(
-            start=start_date.strftime('%Y-%m-%d'),
-            end=end_date.strftime('%Y-%m-%d'),
-            interval=interval,
-            auto_adjust=True
-        )
+            # Download daily data
+            data = yf.download(
+                symbol,
+                start=start_date,
+                end=end_date,
+                auto_adjust=True
+            )
+            # Resample to weekly data ending on Friday
+            data = data.resample('W-FRI').agg({
+                'Open': 'first',
+                'High': 'max',
+                'Low': 'min',
+                'Close': 'last',
+                'Volume': 'sum'
+            })
         
         if data.empty:
             return None
