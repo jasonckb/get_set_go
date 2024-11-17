@@ -314,6 +314,9 @@ def main():
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
     
+    # Store last update time for each timeframe
+    last_update_times = {}
+    
     # Process each symbol
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
@@ -323,6 +326,10 @@ def main():
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
             if data is not None:
+                # Store the last update time for each timeframe
+                if tf_name not in last_update_times:
+                    last_update_times[tf_name] = data.index[-1]
+                
                 # Store raw data
                 debug_data[symbol][tf_name] = {
                     'raw_data': data.tail(),
@@ -376,11 +383,27 @@ def main():
     .value {
         text-align: center;
     }
+    .last-update {
+        text-align: center;
+        font-style: italic;
+        color: #666;
+    }
     </style>
     """, unsafe_allow_html=True)
     
     # Create HTML table
     html_table = "<table>"
+    
+    # Last update time row
+    html_table += "<tr><th></th>"
+    for tf in TIMEFRAMES.keys():
+        last_update = last_update_times.get(tf, "N/A")
+        if isinstance(last_update, pd.Timestamp):
+            last_update_str = last_update.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            last_update_str = str(last_update)
+        html_table += f"<th colspan='4' class='last-update'>Last Update: {last_update_str}</th>"
+    html_table += "</tr>"
     
     # Header
     html_table += "<tr><th></th>"
@@ -425,8 +448,18 @@ def main():
         selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
         
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 5 rows of raw data for {selected_symbol} ({selected_tf})")
-            st.dataframe(debug_data[selected_symbol][selected_tf]['raw_data'])
+            st.subheader(f"Last 5 rows of calculated indicators for {selected_symbol} ({selected_tf})")
+            calcs = debug_data[selected_symbol][selected_tf]['calculations']
+            
+            # Create a DataFrame with all indicators
+            indicators_df = pd.DataFrame({
+                '+DI': calcs['plus_di'],
+                '-DI': calcs['minus_di'],
+                'ADX': calcs['adx'],
+                'MACD': calcs['macd'],
+                'Signal': calcs['signal']
+            })
+            st.dataframe(indicators_df.tail())
     
     with tab_calc:
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
