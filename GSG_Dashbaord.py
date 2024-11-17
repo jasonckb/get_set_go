@@ -228,16 +228,20 @@ def fetch_data(symbol, timeframe):
             start_date = end_date - timedelta(days=100)
             interval = "1d"
         else:  # Weekly
+            # For weekly data, start from a year ago to ensure we have enough historical data
             start_date = end_date - timedelta(days=365)
             interval = "1wk"
+            # Ensure end_date includes the current week's Friday
+            days_until_friday = (4 - end_date.weekday()) % 7  # 4 represents Friday
+            end_date = end_date + timedelta(days=days_until_friday)
         
         # Create a Ticker object
         ticker = yf.Ticker(symbol)
         
-        # Download data
+        # Download data with explicit date formatting
         data = ticker.history(
-            start=start_date,
-            end=end_date,
+            start=start_date.strftime('%Y-%m-%d'),
+            end=end_date.strftime('%Y-%m-%d'),
             interval=interval,
             auto_adjust=True
         )
