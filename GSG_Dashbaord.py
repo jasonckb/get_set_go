@@ -250,7 +250,7 @@ def fetch_data(symbol, timeframe):
         ticker = yf.Ticker(symbol)
         
         if timeframe == "1h":
-            start_date = end_date - timedelta(days=7)
+            start_date = end_date - timedelta(days=10)
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -258,7 +258,7 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         elif timeframe == "1d":
-            start_date = end_date - timedelta(days=100)
+            start_date = end_date - timedelta(days=200)
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -266,7 +266,7 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         else:  # Weekly
-            start_date = end_date - timedelta(days=365)
+            start_date = end_date - timedelta(days=800)
             # Get daily data first
             daily_data = ticker.history(
                 start=start_date,
