@@ -511,7 +511,7 @@ def main():
         selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
         
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 5 rows of data for {selected_symbol} ({selected_tf})")
+            st.subheader(f"Last 30 rows of data for {selected_symbol} ({selected_tf})")
             
             # Get the raw data and calculations
             raw_data = debug_data[selected_symbol][selected_tf]['raw_data']
@@ -519,6 +519,7 @@ def main():
             
             # Combine price data with indicators
             combined_data = pd.DataFrame({
+                'Date': raw_data.index,
                 'Open': raw_data['Open'],
                 'High': raw_data['High'],
                 'Low': raw_data['Low'],
@@ -535,30 +536,61 @@ def main():
             numeric_cols = combined_data.select_dtypes(include=['float64']).columns
             combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
             
-            # Display the combined data
-            st.dataframe(combined_data.tail(50))
+            # Display the last 30 rows
+            st.dataframe(combined_data.tail(30))
+            
+            # Add a download button for the data
+            csv = combined_data.to_csv(index=False)
+            st.download_button(
+                label="Download data as CSV",
+                data=csv,
+                file_name=f'{selected_symbol}_{selected_tf}_data.csv',
+                mime='text/csv',
+            )
     
     with tab_calc:
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Calculations for {selected_symbol} ({selected_tf})")
+            st.subheader(f"Last 30 rows of calculations for {selected_symbol} ({selected_tf})")
             calcs = debug_data[selected_symbol][selected_tf]['calculations']
             
             # DMI Indicators
             st.write("DMI Indicators:")
             dmi_df = pd.DataFrame({
+                'Date': calcs['plus_di'].index,
                 '+DI': calcs['plus_di'],
                 '-DI': calcs['minus_di'],
                 'ADX': calcs['adx']
-            })
+            }).tail(30)
             st.dataframe(dmi_df)
             
             # MACD Indicators
             st.write("MACD Indicators:")
             macd_df = pd.DataFrame({
+                'Date': calcs['macd'].index,
                 'MACD': calcs['macd'],
                 'Signal': calcs['signal']
-            })
+            }).tail(30)
             st.dataframe(macd_df)
+            
+            # Add download buttons for calculations
+            dmi_csv = dmi_df.to_csv(index=False)
+            macd_csv = macd_df.to_csv(index=False)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label="Download DMI data",
+                    data=dmi_csv,
+                    file_name=f'{selected_symbol}_{selected_tf}_dmi.csv',
+                    mime='text/csv',
+                )
+            with col2:
+                st.download_button(
+                    label="Download MACD data",
+                    data=macd_csv,
+                    file_name=f'{selected_symbol}_{selected_tf}_macd.csv',
+                    mime='text/csv',
+                )
 
 if __name__ == "__main__":
     main()
