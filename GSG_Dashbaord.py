@@ -221,6 +221,7 @@ def get_trend(total_score):
 def fetch_data(symbol, timeframe):
     try:
         end_date = datetime.now()
+        
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
             interval = "1h"
@@ -228,7 +229,12 @@ def fetch_data(symbol, timeframe):
             start_date = end_date - timedelta(days=100)
             interval = "1d"
         else:  # Weekly
-            start_date = end_date - timedelta(days=365)
+            # Adjust end_date to next Friday if not already a Friday
+            while end_date.weekday() != 4:  # 4 is Friday
+                end_date += timedelta(days=1)
+            
+            # Start date should be 52 weeks before end_date to ensure we have enough historical data
+            start_date = end_date - timedelta(weeks=52)
             interval = "1wk"
         
         # Create a Ticker object
@@ -247,11 +253,23 @@ def fetch_data(symbol, timeframe):
             
         if len(data) < 30:
             return None
-            
+        
+        # For weekly data, ensure the index ends on Fridays
+        if timeframe == "1wk":
+            # Filter to keep only Friday data
+            data = data[data.index.weekday == 4]
+            # Sort by date descending to get most recent weeks first
+            data = data.sort_index(ascending=False)
+            # Keep only the required number of weeks
+            data = data.head(52)  # Keep last 52 weeks
+            # Sort back to ascending order for calculations
+            data = data.sort_index(ascending=True)
+        
         return data
         
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
+        return None
         return None
 
 def analyze_symbol(data):
