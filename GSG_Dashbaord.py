@@ -240,10 +240,10 @@ def fetch_data(symbol, timeframe):
         # Create a Ticker object
         ticker = yf.Ticker(symbol)
         
-        # Download data
+        # Download data with explicit timezone handling
         data = ticker.history(
-            start=start_date,
-            end=end_date,
+            start=start_date.strftime('%Y-%m-%d'),
+            end=end_date.strftime('%Y-%m-%d'),
             interval=interval,
             auto_adjust=True
         )
@@ -255,7 +255,11 @@ def fetch_data(symbol, timeframe):
             return None
         
         # For weekly data, ensure the index ends on Fridays
-        if timeframe == "1wk":
+        if interval == "1wk":
+            # Convert index to datetime if it's not already
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index)
+            
             # Filter to keep only Friday data
             data = data[data.index.weekday == 4]
             # Sort by date descending to get most recent weeks first
@@ -269,7 +273,6 @@ def fetch_data(symbol, timeframe):
         
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
-        return None
         return None
 
 def analyze_symbol(data):
@@ -345,10 +348,16 @@ def main():
         # Process each timeframe
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
-            if data is not None:
-                # Store the last update time for each timeframe
-                if tf_name not in last_update_times:
-                    last_update_times[tf_name] = data.index[-1]
+            if data is not None and not data.empty:
+                try:
+                    # Store the last update time for each timeframe
+                    if tf_name not in last_update_times and len(data.index) > 0:
+                        last_update_times[tf_name] = data.index[-1]
+                    elif tf_name not in last_update_times:
+                        last_update_times[tf_name] = "No data"
+                except Exception as e:
+                    st.error(f"Error accessing last update time for {symbol} {tf_name}: {str(e)}")
+                    last_update_times[tf_name] = "Error"
                 
                 # Store raw data
                 debug_data[symbol][tf_name] = {
