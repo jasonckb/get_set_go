@@ -393,24 +393,32 @@ def main():
                 if tf_name not in last_update_times:
                     last_update_times[tf_name] = data.index[-1]
                 
-                # Store raw data
+                # Verify data columns and values
+                st.write(f"Debug - {symbol} {tf_name} Data Columns:", data.columns.tolist())
+                st.write(f"Debug - {symbol} {tf_name} Last Row:", data.tail(1))
+                
+                # Store raw data before any modifications
                 debug_data[symbol][tf_name] = {
-                    'raw_data': data.tail(),
+                    'raw_data': data.copy(),  # Store a copy to prevent modifications
                     'calculations': {}
                 }
                 
-                # Calculate indicators
-                plus_di, minus_di, adx = calculate_dmi(data)
-                macd, signal = calculate_macd(data)
+                # Calculate indicators using the raw data
+                plus_di, minus_di, adx = calculate_dmi(data.copy())  # Pass a copy to prevent modifications
+                macd, signal = calculate_macd(data.copy())  # Pass a copy to prevent modifications
                 
                 # Store calculations
                 debug_data[symbol][tf_name]['calculations'] = {
-                    'plus_di': plus_di.tail() if plus_di is not None else None,
-                    'minus_di': minus_di.tail() if minus_di is not None else None,
-                    'adx': adx.tail() if adx is not None else None,
-                    'macd': macd.tail() if macd is not None else None,
-                    'signal': signal.tail() if signal is not None else None
+                    'plus_di': plus_di,
+                    'minus_di': minus_di,
+                    'adx': adx,
+                    'macd': macd,
+                    'signal': signal
                 }
+                
+                # Verify calculations
+                st.write(f"Debug - {symbol} {tf_name} MACD Last Value:", macd.iloc[-1] if macd is not None else None)
+                st.write(f"Debug - {symbol} {tf_name} Signal Last Value:", signal.iloc[-1] if signal is not None else None)
             
             analysis = analyze_symbol(data)
             
