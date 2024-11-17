@@ -359,9 +359,7 @@ def calculate_total_trend(weekly_trend, daily_trend, hourly_trend):
     weekly_val = extract_trend_value(weekly_trend)
     daily_val = extract_trend_value(daily_trend)
     hourly_val = extract_trend_value(hourly_trend)
-    
     weighted_sum = (weekly_val * 2 + daily_val * 2 + hourly_val * 1) / 5
-    
     if weighted_sum >= 5:
         return (f"Buy ({weighted_sum:.1f})", "green")
     elif weighted_sum <= -5:
@@ -384,10 +382,9 @@ def main():
     
     symbols = default_stocks[selected_portfolio]
     debug_data = {}
-    
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
-    total_trends = {}  # Store Total Trend separately
+    total_trends = {}
     
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -398,7 +395,7 @@ def main():
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
         debug_data[symbol] = {}
-        timeframe_results = {}
+        symbol_timeframe_results = {}  # Store results for all timeframes for this symbol
 
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
@@ -424,21 +421,23 @@ def main():
                 
                 analysis = analyze_symbol(data)
                 if analysis:
-                    timeframe_results[tf_name] = analysis
+                    symbol_timeframe_results[tf_name] = analysis
                     for indicator in ['Get', 'Set', 'Go', 'Trend']:
                         results.loc[symbol, (tf_name, indicator)] = analysis[indicator]
             
             current_iteration += 1
             progress_bar.progress(current_iteration / total_iterations)
-        
-        # Calculate Total Trend after processing all timeframes for this symbol
-        if timeframe_results:
+
+        # Calculate Total Trend after collecting all timeframe data for this symbol
+        if all(tf in symbol_timeframe_results for tf in TIMEFRAMES.keys()):
             total_trend = calculate_total_trend(
-                timeframe_results['Weekly']['Trend'],
-                timeframe_results['Daily']['Trend'],
-                timeframe_results['Hourly']['Trend']
+                symbol_timeframe_results['Weekly']['Trend'],
+                symbol_timeframe_results['Daily']['Trend'],
+                symbol_timeframe_results['Hourly']['Trend']
             )
             total_trends[symbol] = total_trend
+        else:
+            total_trends[symbol] = ('N/A', 'white')
     
     progress_bar.empty()
     status_text.empty()
@@ -496,13 +495,10 @@ def main():
     
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
-        
-        # Add Total Trend column
         total_trend = total_trends.get(symbol, ('N/A', 'white'))
         text, color = total_trend
         html_table += f"<td class='value' style='color:{color};'>{text}</td>"
         
-        # Add other columns
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
@@ -514,7 +510,6 @@ def main():
         html_table += "</tr>"
     
     html_table += "</table>"
-    
     st.markdown(html_table, unsafe_allow_html=True)
     
     st.markdown("---")
