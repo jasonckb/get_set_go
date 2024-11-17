@@ -221,10 +221,10 @@ def get_trend(total_score):
 def fetch_data(symbol, timeframe):
     try:
         end_date = datetime.now()
+        ticker = yf.Ticker(symbol)
+        
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
-            # Download hourly data directly
-            ticker = yf.Ticker(symbol)
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -233,8 +233,6 @@ def fetch_data(symbol, timeframe):
             )
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
-            # Download daily data directly
-            ticker = yf.Ticker(symbol)
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -242,10 +240,8 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         else:  # Weekly
-            # For weekly data, download daily data and resample
             start_date = end_date - timedelta(days=365)
-            # Download daily data with adjusted close
-            ticker = yf.Ticker(symbol)
+            # Get daily data first
             data = ticker.history(
                 start=start_date,
                 end=end_date,
@@ -253,17 +249,38 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
             
-            # Define aggregation functions for each column
-            functions = {
-                "Open": "first",
-                "High": "max",
-                "Low": "min",
-                "Close": "last",
-                "Volume": "sum"
-            }
+            # Check if it's a HK stock
+            is_hk_stock = symbol.endswith('.HK')
             
-            # Resample to weekly data ending on Friday with proper aggregation
-            data = data.resample('W-FRI').agg(functions)
+            if is_hk_stock:
+                # For HK stocks, explicitly set the timezone to HK time
+                data.index = data.index.tz_localize(None)  # Remove timezone first
+                data.index = data.index.tz_localize('Asia/Hong_Kong')  # Set to HK timezone
+                
+                # Resample to weekly ending Friday, but account for HK trading hours
+                functions = {
+                    "Open": "first",
+                    "High": "max",
+                    "Low": "min",
+                    "Close": "last",
+                    "Volume": "sum"
+                }
+                
+                # Resample with HK market close time (16:00 HK time)
+                data = data.resample('W-FRI', closed='right', label='right').agg(functions)
+                
+                # Convert back to UTC to match TradingView's display
+                data.index = data.index.tz_convert('UTC')
+            else:
+                # For non-HK stocks, use standard weekly resampling
+                functions = {
+                    "Open": "first",
+                    "High": "max",
+                    "Low": "min",
+                    "Close": "last",
+                    "Volume": "sum"
+                }
+                data = data.resample('W-FRI').agg(functions)
         
         if data.empty:
             return None
@@ -271,15 +288,14 @@ def fetch_data(symbol, timeframe):
         if len(data) < 30:
             return None
             
+        # Remove timezone information to avoid any timezone-related issues
+        data.index = data.index.tz_localize(None)
         return data
         
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
-    except Exception as e:
-        st.error(f"Error fetching data for {symbol}: {str(e)}")
-        return None
 
 def analyze_symbol(data):
     if data is None or len(data) < 30:
