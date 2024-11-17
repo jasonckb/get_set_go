@@ -267,6 +267,9 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
             
+            # Fill missing data with previous day's data
+            daily_data = daily_data.fillna(method='ffill')
+            
             # Check if it's a HK stock
             is_hk_stock = symbol.endswith('.HK')
             
@@ -297,7 +300,13 @@ def fetch_data(symbol, timeframe):
             
         if len(data) < 30:
             return None
-            
+        
+        # Fill any remaining missing data
+        data = data.fillna(method='ffill')
+        
+        # Fill any leading NaN values with the first valid value
+        data = data.fillna(method='bfill')
+        
         # Ensure index has no timezone info
         data.index = data.index.tz_localize(None)
         return data
