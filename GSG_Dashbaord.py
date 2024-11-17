@@ -223,41 +223,24 @@ def fetch_data(symbol, timeframe):
         end_date = datetime.now()
         if timeframe == "1h":
             start_date = end_date - timedelta(days=7)
-            # Download hourly data directly
-            ticker = yf.Ticker(symbol)
-            data = ticker.history(
-                start=start_date,
-                end=end_date,
-                interval="1h",
-                auto_adjust=True
-            )
+            interval = "1h"
         elif timeframe == "1d":
             start_date = end_date - timedelta(days=100)
-            # Download daily data directly
-            data = yf.download(
-                symbol,
-                start=start_date,
-                end=end_date,
-                auto_adjust=True
-            )
+            interval = "1d"
         else:  # Weekly
-            # For weekly data, download daily data and resample
             start_date = end_date - timedelta(days=365)
-            # Download daily data
-            data = yf.download(
-                symbol,
-                start=start_date,
-                end=end_date,
-                auto_adjust=True
-            )
-            # Resample to weekly data ending on Friday
-            data = data.resample('W-FRI').agg({
-                'Open': 'first',
-                'High': 'max',
-                'Low': 'min',
-                'Close': 'last',
-                'Volume': 'sum'
-            })
+            interval = "1wk"
+        
+        # Create a Ticker object
+        ticker = yf.Ticker(symbol)
+        
+        # Download data
+        data = ticker.history(
+            start=start_date,
+            end=end_date,
+            interval=interval,
+            auto_adjust=True
+        )
         
         if data.empty:
             return None
