@@ -116,30 +116,32 @@ def calculate_dmi(df, length=14, smoothing=14):
 def pine_ema(series, length, alpha_adj=19):
     """Replicate TradingView's pine_ema function exactly"""
     alpha = 2.0 / (length + alpha_adj)
-    result = pd.Series(0.0, index=series.index)
+    result = pd.Series(index=series.index)
     
-    # Find first valid value
-    first_valid_idx = series.first_valid_index()
-    if first_valid_idx is None:
-        return result
+    # Initialize with NaN
+    result.iloc[0] = series.iloc[0]
     
-    # Set first value
-    result.loc[first_valid_idx] = series.loc[first_valid_idx]
-    
-    # Calculate EMA using TradingView's method
-    for i in range(series.index.get_loc(first_valid_idx) + 1, len(series)):
-        if pd.isna(series.iloc[i]):
-            result.iloc[i] = result.iloc[i-1]  # Use previous value for NaN
+    # Calculate exactly like TradingView:
+    # sum := na(sum[1]) ? src : alpha * src + (1 - alpha) * nz(sum[1])
+    for i in range(1, len(series)):
+        prev_sum = result.iloc[i-1]
+        curr_src = series.iloc[i]
+        
+        if pd.isna(prev_sum):
+            # If previous sum is NA, use current source value
+            result.iloc[i] = curr_src
         else:
-            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+            # Otherwise use EMA formula
+            result.iloc[i] = alpha * curr_src + (1 - alpha) * (prev_sum if not pd.isna(prev_sum) else 0)
     
     return result
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
+        # Use Close price
         close = df['Close'].copy()
         
-        # Calculate MACD using pine_ema
+        # Calculate MACD using pine_ema exactly like TradingView
         fast_ma = pine_ema(close, fast_length, alpha_adj)
         slow_ma = pine_ema(close, slow_length, alpha_adj)
         macd = fast_ma - slow_ma
