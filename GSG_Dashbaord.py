@@ -101,29 +101,58 @@ def calculate_dmi(df, length=14, smoothing=14):
         return None, None, None
 
 def pine_ema(series, length, alpha_adj=19):
-    """Replicate PineScript's pine_ema function"""
-    alpha = 2 / (length + alpha_adj)
-    result = pd.Series(index=series.index)
-    result.iloc[0] = series.iloc[0]  # Initialize first value
-    for i in range(1, len(series)):
-        result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    """Replicate TradingView's pine_ema function exactly"""
+    # Initialize the result series with NaN
+    result = pd.Series(float('nan'), index=series.index)
+    
+    # Find the first valid value
+    first_valid_idx = series.first_valid_index()
+    if first_valid_idx is None:
+        return result
+        
+    # Set the first value
+    result.loc[first_valid_idx] = series.loc[first_valid_idx]
+    
+    # Calculate alpha exactly as TradingView does
+    alpha = 2.0 / (length + alpha_adj)
+    
+    # Calculate EMA using TradingView's method
+    current_idx = series.index.get_loc(first_valid_idx)
+    for i in range(current_idx + 1, len(series)):
+        if pd.isna(series.iloc[i]):
+            continue
+        if pd.isna(result.iloc[i-1]):
+            result.iloc[i] = series.iloc[i]
+        else:
+            result.iloc[i] = alpha * series.iloc[i] + (1 - alpha) * result.iloc[i-1]
+    
     return result
 
 def calculate_macd(df, fast_length=12, slow_length=26, signal_length=9, alpha_adj=19):
     try:
+        # Use Close price and handle NaN values
         close = df['Close'].copy()
         
-        # Calculate MACD using pine_ema (matching PineScript)
+        # Calculate MACD using pine_ema exactly like TradingView
         fast_ma = pine_ema(close, fast_length, alpha_adj)
         slow_ma = pine_ema(close, slow_length, alpha_adj)
+        
+        # Calculate MACD line
         macd = fast_ma - slow_ma
+        
+        # Calculate signal line
         signal = pine_ema(macd, signal_length, alpha_adj)
+        
+        # Handle any remaining NaN values
+        macd = macd.fillna(method='ffill')
+        signal = signal.fillna(method='ffill')
         
         return macd, signal
         
     except Exception as e:
         st.error(f"Error in MACD calculation: {str(e)}")
         return None, None
+
 
 def get_state(plus_di, minus_di, adx):
     if plus_di is None or minus_di is None or adx is None:
@@ -240,9 +269,9 @@ def fetch_data(symbol, timeframe):
                 auto_adjust=True
             )
         else:  # Weekly
-            start_date = end_date - timedelta(days=365)
-            # Get daily data first
-            data = ticker.history(
+            # For weekly data, get more historical daily data for better indicator calculation
+            start_date = end_date - timedelta(days=365 + 100)  # Extra 100 days for warmup
+            daily_data = ticker.history(
                 start=start_date,
                 end=end_date,
                 interval="1d",
@@ -252,35 +281,27 @@ def fetch_data(symbol, timeframe):
             # Check if it's a HK stock
             is_hk_stock = symbol.endswith('.HK')
             
+            # Define resampling functions
+            functions = {
+                "Open": "first",
+                "High": "max",
+                "Low": "min",
+                "Close": "last",
+                "Volume": "sum"
+            }
+            
             if is_hk_stock:
-                # For HK stocks, explicitly set the timezone to HK time
-                data.index = data.index.tz_localize(None)  # Remove timezone first
-                data.index = data.index.tz_localize('Asia/Hong_Kong')  # Set to HK timezone
-                
-                # Resample to weekly ending Friday, but account for HK trading hours
-                functions = {
-                    "Open": "first",
-                    "High": "max",
-                    "Low": "min",
-                    "Close": "last",
-                    "Volume": "sum"
-                }
-                
-                # Resample with HK market close time (16:00 HK time)
-                data = data.resample('W-FRI', closed='right', label='right').agg(functions)
-                
-                # Convert back to UTC to match TradingView's display
-                data.index = data.index.tz_convert('UTC')
+                # For HK stocks, handle timezone appropriately
+                daily_data.index = daily_data.index.tz_localize(None)
+                daily_data.index = daily_data.index.tz_localize('Asia/Hong_Kong')
+                data = daily_data.resample('W-FRI', closed='right', label='right').agg(functions)
+                data.index = data.index.tz_localize(None)
             else:
-                # For non-HK stocks, use standard weekly resampling
-                functions = {
-                    "Open": "first",
-                    "High": "max",
-                    "Low": "min",
-                    "Close": "last",
-                    "Volume": "sum"
-                }
-                data = data.resample('W-FRI').agg(functions)
+                # For other stocks, use standard resampling
+                data = daily_data.resample('W-FRI').agg(functions)
+            
+            # Keep only the last year of data
+            data = data.tail(52)
         
         if data.empty:
             return None
@@ -288,15 +309,13 @@ def fetch_data(symbol, timeframe):
         if len(data) < 30:
             return None
             
-        # Remove timezone information to avoid any timezone-related issues
+        # Ensure index has no timezone info
         data.index = data.index.tz_localize(None)
         return data
         
     except Exception as e:
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
-
-
 def analyze_symbol(data):
     if data is None or len(data) < 30:
         return {
