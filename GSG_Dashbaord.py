@@ -512,18 +512,32 @@ def main():
         selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
         
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 5 rows of calculated indicators for {selected_symbol} ({selected_tf})")
+            st.subheader(f"Last 5 rows of data for {selected_symbol} ({selected_tf})")
+            
+            # Get the raw data and calculations
+            raw_data = debug_data[selected_symbol][selected_tf]['raw_data']
             calcs = debug_data[selected_symbol][selected_tf]['calculations']
             
-            # Create a DataFrame with all indicators
-            indicators_df = pd.DataFrame({
+            # Combine price data with indicators
+            combined_data = pd.DataFrame({
+                'Open': raw_data['Open'],
+                'High': raw_data['High'],
+                'Low': raw_data['Low'],
+                'Close': raw_data['Close'],
+                'Volume': raw_data['Volume'],
                 '+DI': calcs['plus_di'],
                 '-DI': calcs['minus_di'],
                 'ADX': calcs['adx'],
                 'MACD': calcs['macd'],
                 'Signal': calcs['signal']
             })
-            st.dataframe(indicators_df.tail())
+            
+            # Format numeric columns to 4 decimal places
+            numeric_cols = combined_data.select_dtypes(include=['float64']).columns
+            combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
+            
+            # Display the combined data
+            st.dataframe(combined_data.tail())
     
     with tab_calc:
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
@@ -549,3 +563,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
