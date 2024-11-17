@@ -536,7 +536,7 @@ def main():
             combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
             
             # Display the combined data
-            st.dataframe(combined_data.tail())
+            st.dataframe(combined_data.tail(50))
     
     with tab_calc:
         if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
