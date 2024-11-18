@@ -511,7 +511,7 @@ def main():
     status_text.empty()
     
     # Display signals section
-    st.subheader("Signals")
+    #st.subheader("Signals")
     col1, col2 = st.columns(2)
     
     with col1:
