@@ -8,6 +8,12 @@ import time
 # Initialize session state if not already initialized
 if 'session_info' not in st.session_state:
     st.session_state.session_info = {}
+    
+# Initialize historical states
+if 'last_states' not in st.session_state:
+    st.session_state.last_states = {}
+if 'last_total_trends' not in st.session_state:
+    st.session_state.last_total_trends = {}
 
 # Set page config
 st.set_page_config(layout="wide", page_title="Stock DMI MACD States Dashboard")
@@ -243,6 +249,28 @@ def get_trend(total_score):
     else:
         return f"Hold ({total_score})", "gray"
 
+def extract_trend_value(trend_str):
+    if not isinstance(trend_str, tuple):
+        return 0
+    trend_text = trend_str[0]
+    if not isinstance(trend_text, str):
+        return 0
+    import re
+    match = re.search(r'\(([+-]?\d+(?:\.\d+)?)\)', trend_text)
+    return float(match.group(1)) if match else 0
+
+def calculate_total_trend(weekly_trend, daily_trend, hourly_trend):
+    weekly_val = extract_trend_value(weekly_trend)
+    daily_val = extract_trend_value(daily_trend)
+    hourly_val = extract_trend_value(hourly_trend)
+    weighted_sum = (weekly_val * 2 + daily_val * 2 + hourly_val * 1) / 5
+    if weighted_sum >= 5:
+        return (f"Buy ({weighted_sum:.1f})", "green")
+    elif weighted_sum <= -5:
+        return (f"Sell ({weighted_sum:.1f})", "red")
+    else:
+        return (f"Hold ({weighted_sum:.1f})", "gray")
+
 @st.cache_data(ttl=300)  # Cache data for 5 minutes
 def fetch_data(symbol, timeframe):
     try:
@@ -345,34 +373,62 @@ def analyze_symbol(data):
         st.error(f"Error in analysis: {str(e)}")
         return None
 
-def extract_trend_value(trend_str):
-    if not isinstance(trend_str, tuple):
-        return 0
-    trend_text = trend_str[0]
-    if not isinstance(trend_text, str):
-        return 0
-    import re
-    match = re.search(r'\(([+-]?\d+)\)', trend_text)
-    return int(match.group(1)) if match else 0
+def check_dmi_signals(symbol, current_data, last_data):
+    """Check for DMI signal conditions"""
+    if not (current_data and last_data):
+        return False, False
+    
+    # Extract DMI states
+    current_weekly = current_data.get(('Weekly', 'Get'), ('N/A', 'white'))[0]
+    current_daily = current_data.get(('Daily', 'Get'), ('N/A', 'white'))[0]
+    current_hourly = current_data.get(('Hourly', 'Get'), ('N/A', 'white'))[0]
+    
+    last_weekly = last_data.get(('Weekly', 'Get'), ('N/A', 'white'))[0]
+    last_daily = last_data.get(('Daily', 'Get'), ('N/A', 'white'))[0]
+    last_hourly = last_data.get(('Hourly', 'Get'), ('N/A', 'white'))[0]
+    
+    # Check for buy signal
+    buy_signal = (
+        any(state.startswith('Bearish') for state in [last_weekly, last_daily, last_hourly]) and
+        all(state.startswith('Bullish') for state in [current_weekly, current_daily, current_hourly])
+    )
+    
+    # Check for sell signal
+    sell_signal = (
+        any(state.startswith('Bullish') for state in [last_weekly, last_daily, last_hourly]) and
+        all(state.startswith('Bearish') for state in [current_weekly, current_daily, current_hourly])
+    )
+    
+    return buy_signal, sell_signal
 
-def calculate_total_trend(weekly_trend, daily_trend, hourly_trend):
-    weekly_val = extract_trend_value(weekly_trend)
-    daily_val = extract_trend_value(daily_trend)
-    hourly_val = extract_trend_value(hourly_trend)
-    weighted_sum = (weekly_val * 2 + daily_val * 2 + hourly_val * 1) / 5
-    if weighted_sum >= 5:
-        return (f"Buy ({weighted_sum:.1f})", "green")
-    elif weighted_sum <= -5:
-        return (f"Sell ({weighted_sum:.1f})", "red")
-    else:
-        return (f"Hold ({weighted_sum:.1f})", "gray")
+def check_trend_signals(symbol, current_data, last_data):
+    """Check for trend signal conditions"""
+    if not (current_data and last_data):
+        return False, False
+    
+    # Get current and last total trends
+    current_trend = current_data.get(('Hourly', 'Trend'), ('Hold (0)', 'gray'))[0]
+    last_trend = last_data.get(('Hourly', 'Trend'), ('Hold (0)', 'gray'))[0]
+    
+    current_value = extract_trend_value(('', current_trend))
+    last_value = extract_trend_value(('', last_trend))
+    
+    # Check for buy signal
+    buy_signal = last_value < 5 and current_value >= 5
+    
+    # Check for sell signal
+    sell_signal = last_value > -5 and current_value <= -5
+    
+    return buy_signal, sell_signal
 
 def main():
     st.title("Get Set Go Dashboard")
     
+    # Clear cache if refresh button is clicked
     if st.button("Refresh Data"):
         st.cache_data.clear()
     
+    # Sidebar for portfolio selection
     st.sidebar.title("Settings")
     selected_portfolio = st.sidebar.selectbox(
         "Select Portfolio",
@@ -380,68 +436,113 @@ def main():
         key="portfolio_selector"
     )
     
+    # Get selected symbols
     symbols = default_stocks[selected_portfolio]
+    
+    # Store data and calculations
     debug_data = {}
+    
+    # Create empty DataFrame for results
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
-    total_trends = {}
     
+    # Lists for signals
+    get_buy_signals = []
+    get_sell_signals = []
+    trend_buy_signals = []
+    trend_sell_signals = []
+    
+    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
+    
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
+    
+    # Store last update time for each timeframe
     last_update_times = {}
     
+    # Process each symbol
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
         debug_data[symbol] = {}
-        symbol_timeframe_results = {}  # Store results for all timeframes for this symbol
-
+        symbol_results = {}
+        
+        # Process each timeframe
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
             if data is not None:
+                # Store the last update time for each timeframe
                 if tf_name not in last_update_times:
                     last_update_times[tf_name] = data.index[-1]
                 
-                debug_data[symbol][tf_name] = {
-                    'raw_data': data.tail(),
-                    'calculations': {}
-                }
-                
-                plus_di, minus_di, adx = calculate_dmi(data)
-                macd, signal = calculate_macd(data)
-                
-                debug_data[symbol][tf_name]['calculations'] = {
-                    'plus_di': plus_di.tail() if plus_di is not None else None,
-                    'minus_di': minus_di.tail() if minus_di is not None else None,
-                    'adx': adx.tail() if adx is not None else None,
-                    'macd': macd.tail() if macd is not None else None,
-                    'signal': signal.tail() if signal is not None else None
-                }
-                
                 analysis = analyze_symbol(data)
                 if analysis:
-                    symbol_timeframe_results[tf_name] = analysis
                     for indicator in ['Get', 'Set', 'Go', 'Trend']:
                         results.loc[symbol, (tf_name, indicator)] = analysis[indicator]
+                        symbol_results[(tf_name, indicator)] = analysis[indicator]
             
             current_iteration += 1
             progress_bar.progress(current_iteration / total_iterations)
-
-        # Calculate Total Trend after collecting all timeframe data for this symbol
-        if all(tf in symbol_timeframe_results for tf in TIMEFRAMES.keys()):
-            total_trend = calculate_total_trend(
-                symbol_timeframe_results['Weekly']['Trend'],
-                symbol_timeframe_results['Daily']['Trend'],
-                symbol_timeframe_results['Hourly']['Trend']
-            )
-            total_trends[symbol] = total_trend
-        else:
-            total_trends[symbol] = ('N/A', 'white')
+        
+        # Check for signals
+        last_states = st.session_state.last_states.get(symbol, {})
+        last_total_trends = st.session_state.last_total_trends.get(symbol, {})
+        
+        # Check DMI signals
+        dmi_buy, dmi_sell = check_dmi_signals(symbol, symbol_results, last_states)
+        if dmi_buy:
+            get_buy_signals.append(symbol)
+        if dmi_sell:
+            get_sell_signals.append(symbol)
+        
+        # Check trend signals
+        trend_buy, trend_sell = check_trend_signals(symbol, symbol_results, last_states)
+        if trend_buy:
+            trend_buy_signals.append(symbol)
+        if trend_sell:
+            trend_sell_signals.append(symbol)
+        
+        # Update historical states
+        st.session_state.last_states[symbol] = symbol_results.copy()
+        st.session_state.last_total_trends[symbol] = symbol_results.get(('Hourly', 'Trend'), ('Hold (0)', 'gray'))
     
     progress_bar.empty()
     status_text.empty()
     
+    # Display signals section
+    st.subheader("Signals")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("### Buy Signals")
+        st.markdown("#### 3 Gets Buy")
+        if get_buy_signals:
+            st.write(", ".join(get_buy_signals))
+        else:
+            st.write("No signals")
+            
+        st.markdown("#### Total Trend Buy")
+        if trend_buy_signals:
+            st.write(", ".join(trend_buy_signals))
+        else:
+            st.write("No signals")
+    
+    with col2:
+        st.markdown("### Sell Signals")
+        st.markdown("#### 3 Gets Sell")
+        if get_sell_signals:
+            st.write(", ".join(get_sell_signals))
+        else:
+            st.write("No signals")
+            
+        st.markdown("#### Total Trend Sell")
+        if trend_sell_signals:
+            st.write(", ".join(trend_sell_signals))
+        else:
+            st.write("No signals")
+    
+    # Table styling
     st.markdown("""
     <style>
     table {
@@ -471,9 +572,11 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
+    # Create HTML table
     html_table = "<table>"
     
-    html_table += "<tr><th></th><th></th>"
+    # Last update time row
+    html_table += "<tr><th></th>"
     for tf in TIMEFRAMES.keys():
         last_update = last_update_times.get(tf, "N/A")
         if isinstance(last_update, pd.Timestamp):
@@ -483,22 +586,21 @@ def main():
         html_table += f"<th colspan='4' class='last-update'>Last Update: {last_update_str}</th>"
     html_table += "</tr>"
     
-    html_table += "<tr><th></th><th class='timeframe'>Total Trend</th>"
+    # Header
+    html_table += "<tr><th></th>"
     for tf in TIMEFRAMES.keys():
         html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
     html_table += "</tr>"
     
-    html_table += "<tr><th class='symbol'>Symbol</th><th class='value'></th>"
+    # Subheader
+    html_table += "<tr><th class='symbol'>Symbol</th>"
     for _ in TIMEFRAMES.keys():
         html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
     html_table += "</tr>"
     
+    # Data rows
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
-        total_trend = total_trends.get(symbol, ('N/A', 'white'))
-        text, color = total_trend
-        html_table += f"<td class='value' style='color:{color};'>{text}</td>"
-        
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
@@ -510,91 +612,8 @@ def main():
         html_table += "</tr>"
     
     html_table += "</table>"
+    
     st.markdown(html_table, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    st.header("Debug View")
-    
-    tab_raw, tab_calc = st.tabs(["Raw Data", "Calculations"])
-    
-    with tab_raw:
-        col1, col2 = st.columns(2)
-        selected_symbol = col1.selectbox("Select Symbol", symbols, key="debug_symbol")
-        selected_tf = col2.selectbox("Select Timeframe", list(TIMEFRAMES.keys()), key="debug_tf")
-        
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 30 rows of data for {selected_symbol} ({selected_tf})")
-            
-            raw_data = debug_data[selected_symbol][selected_tf]['raw_data']
-            calcs = debug_data[selected_symbol][selected_tf]['calculations']
-            
-            combined_data = pd.DataFrame({
-                'Date': raw_data.index,
-                'Open': raw_data['Open'],
-                'High': raw_data['High'],
-                'Low': raw_data['Low'],
-                'Close': raw_data['Close'],
-                'Volume': raw_data['Volume'],
-                '+DI': calcs['plus_di'],
-                '-DI': calcs['minus_di'],
-                'ADX': calcs['adx'],
-                'MACD': calcs['macd'],
-                'Signal': calcs['signal']
-            })
-            
-            numeric_cols = combined_data.select_dtypes(include=['float64']).columns
-            combined_data[numeric_cols] = combined_data[numeric_cols].round(4)
-            
-            st.dataframe(combined_data.tail(30))
-            
-            csv = combined_data.to_csv(index=False)
-            st.download_button(
-                label="Download data as CSV",
-                data=csv,
-                file_name=f'{selected_symbol}_{selected_tf}_data.csv',
-                mime='text/csv',
-            )
-    
-    with tab_calc:
-        if selected_symbol in debug_data and selected_tf in debug_data[selected_symbol]:
-            st.subheader(f"Last 30 rows of calculations for {selected_symbol} ({selected_tf})")
-            calcs = debug_data[selected_symbol][selected_tf]['calculations']
-            
-            st.write("DMI Indicators:")
-            dmi_df = pd.DataFrame({
-                'Date': calcs['plus_di'].index,
-                '+DI': calcs['plus_di'],
-                '-DI': calcs['minus_di'],
-                'ADX': calcs['adx']
-            }).tail(30)
-            st.dataframe(dmi_df)
-            
-            st.write("MACD Indicators:")
-            macd_df = pd.DataFrame({
-                'Date': calcs['macd'].index,
-                'MACD': calcs['macd'],
-                'Signal': calcs['signal']
-            }).tail(30)
-            st.dataframe(macd_df)
-            
-            dmi_csv = dmi_df.to_csv(index=False)
-            macd_csv = macd_df.to_csv(index=False)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    label="Download DMI data",
-                    data=dmi_csv,
-                    file_name=f'{selected_symbol}_{selected_tf}_dmi.csv',
-                    mime='text/csv',
-                )
-            with col2:
-                st.download_button(
-                    label="Download MACD data",
-                    data=macd_csv,
-                    file_name=f'{selected_symbol}_{selected_tf}_macd.csv',
-                    mime='text/csv',
-                )
 
 if __name__ == "__main__":
     main()
