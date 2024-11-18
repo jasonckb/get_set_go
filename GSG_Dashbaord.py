@@ -424,11 +424,9 @@ def check_trend_signals(symbol, current_data, last_data):
 def main():
     st.title("Get Set Go Dashboard")
     
-    # Clear cache if refresh button is clicked
     if st.button("Refresh Data"):
         st.cache_data.clear()
     
-    # Sidebar for portfolio selection
     st.sidebar.title("Settings")
     selected_portfolio = st.sidebar.selectbox(
         "Select Portfolio",
@@ -436,15 +434,11 @@ def main():
         key="portfolio_selector"
     )
     
-    # Get selected symbols
     symbols = default_stocks[selected_portfolio]
-    
-    # Store data and calculations
     debug_data = {}
-    
-    # Create empty DataFrame for results
     columns = pd.MultiIndex.from_product([TIMEFRAMES.keys(), ['Get', 'Set', 'Go', 'Trend']])
     results = pd.DataFrame(index=symbols, columns=columns)
+    total_trends = {}
     
     # Lists for signals
     get_buy_signals = []
@@ -452,38 +446,60 @@ def main():
     trend_buy_signals = []
     trend_sell_signals = []
     
-    # Progress tracking
     progress_bar = st.progress(0)
     status_text = st.empty()
-    
     total_iterations = len(symbols) * len(TIMEFRAMES)
     current_iteration = 0
-    
-    # Store last update time for each timeframe
     last_update_times = {}
     
-    # Process each symbol
     for symbol in symbols:
         status_text.text(f"Processing {symbol}...")
         debug_data[symbol] = {}
-        symbol_results = {}
-        
-        # Process each timeframe
+        symbol_timeframe_results = {}  # Store results for all timeframes for this symbol
+        symbol_results = {}  # For signal checking
+
         for tf_name, tf_code in TIMEFRAMES.items():
             data = fetch_data(symbol, tf_code)
             if data is not None:
-                # Store the last update time for each timeframe
                 if tf_name not in last_update_times:
                     last_update_times[tf_name] = data.index[-1]
                 
+                debug_data[symbol][tf_name] = {
+                    'raw_data': data.tail(),
+                    'calculations': {}
+                }
+                
+                plus_di, minus_di, adx = calculate_dmi(data)
+                macd, signal = calculate_macd(data)
+                
+                debug_data[symbol][tf_name]['calculations'] = {
+                    'plus_di': plus_di.tail() if plus_di is not None else None,
+                    'minus_di': minus_di.tail() if minus_di is not None else None,
+                    'adx': adx.tail() if adx is not None else None,
+                    'macd': macd.tail() if macd is not None else None,
+                    'signal': signal.tail() if signal is not None else None
+                }
+                
                 analysis = analyze_symbol(data)
                 if analysis:
+                    symbol_timeframe_results[tf_name] = analysis
                     for indicator in ['Get', 'Set', 'Go', 'Trend']:
                         results.loc[symbol, (tf_name, indicator)] = analysis[indicator]
                         symbol_results[(tf_name, indicator)] = analysis[indicator]
             
             current_iteration += 1
             progress_bar.progress(current_iteration / total_iterations)
+
+        # Calculate Total Trend after collecting all timeframe data for this symbol
+        if all(tf in symbol_timeframe_results for tf in TIMEFRAMES.keys()):
+            total_trend = calculate_total_trend(
+                symbol_timeframe_results['Weekly']['Trend'],
+                symbol_timeframe_results['Daily']['Trend'],
+                symbol_timeframe_results['Hourly']['Trend']
+            )
+            total_trends[symbol] = total_trend
+        else:
+            total_trends[symbol] = ('N/A', 'white')
         
         # Check for signals
         last_states = st.session_state.last_states.get(symbol, {})
@@ -511,18 +527,18 @@ def main():
     status_text.empty()
     
     # Display signals section
-    #st.subheader("Signals")
+    st.subheader("Signals")
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("### Buy Signals")
-        st.markdown("### 3 Gets Buy")
+        st.markdown("#### 3 Gets Buy")
         if get_buy_signals:
             st.write(", ".join(get_buy_signals))
         else:
             st.write("No signals")
             
-        st.markdown("### Total Trend Buy")
+        st.markdown("#### Total Trend Buy")
         if trend_buy_signals:
             st.write(", ".join(trend_buy_signals))
         else:
@@ -530,19 +546,18 @@ def main():
     
     with col2:
         st.markdown("### Sell Signals")
-        st.markdown("### 3 Gets Sell")
+        st.markdown("#### 3 Gets Sell")
         if get_sell_signals:
             st.write(", ".join(get_sell_signals))
         else:
             st.write("No signals")
             
-        st.markdown("### Total Trend Sell")
+        st.markdown("#### Total Trend Sell")
         if trend_sell_signals:
             st.write(", ".join(trend_sell_signals))
         else:
             st.write("No signals")
     
-    # Table styling
     st.markdown("""
     <style>
     table {
@@ -572,11 +587,9 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    # Create HTML table
     html_table = "<table>"
     
-    # Last update time row
-    html_table += "<tr><th></th>"
+    html_table += "<tr><th></th><th></th>"
     for tf in TIMEFRAMES.keys():
         last_update = last_update_times.get(tf, "N/A")
         if isinstance(last_update, pd.Timestamp):
@@ -586,21 +599,22 @@ def main():
         html_table += f"<th colspan='4' class='last-update'>Last Update: {last_update_str}</th>"
     html_table += "</tr>"
     
-    # Header
-    html_table += "<tr><th></th>"
+    html_table += "<tr><th></th><th class='timeframe'>Total Trend</th>"
     for tf in TIMEFRAMES.keys():
         html_table += f"<th colspan='4' class='timeframe'>{tf}</th>"
     html_table += "</tr>"
     
-    # Subheader
-    html_table += "<tr><th class='symbol'>Symbol</th>"
+    html_table += "<tr><th class='symbol'>Symbol</th><th class='value'></th>"
     for _ in TIMEFRAMES.keys():
         html_table += "<th class='value'>Get</th><th class='value'>Set</th><th class='value'>Go</th><th class='value'>Trend</th>"
     html_table += "</tr>"
     
-    # Data rows
     for symbol in symbols:
         html_table += f"<tr><td class='symbol'>{symbol}</td>"
+        total_trend = total_trends.get(symbol, ('N/A', 'white'))
+        text, color = total_trend
+        html_table += f"<td class='value' style='color:{color};'>{text}</td>"
+        
         for tf in TIMEFRAMES.keys():
             for col in ['Get', 'Set', 'Go', 'Trend']:
                 value = results.loc[symbol, (tf, col)]
@@ -612,9 +626,8 @@ def main():
         html_table += "</tr>"
     
     html_table += "</table>"
-    
     st.markdown(html_table, unsafe_allow_html=True)
-
+    
     st.markdown("---")
     st.header("Debug View")
     
@@ -698,6 +711,7 @@ def main():
                     file_name=f'{selected_symbol}_{selected_tf}_macd.csv',
                     mime='text/csv',
                 )
+
 
 if __name__ == "__main__":
     main()
